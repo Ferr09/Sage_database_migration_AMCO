@@ -1,0 +1,36 @@
+# Environnement virtuel
+.venv/
+env/
+
+# Fichiers Python compilés
+__pycache__/
+*.pyc
+*.pyo
+
+# Configurations personnelles
+*.env
+*.DS_Store
+
+# Sauvegardes temporaires ou logs
+*.log
+*.bak
+
+# Fichiers sensibles ou de configuration
+config/*.json
+
+# Base de données Access locale
+db_sage_access/*.accdb
+db_sage_access/tables_access.txt
+
+# Jupyter ou notebook
+.ipynb_checkpoints/
+
+# Éditeurs
+.vscode/
+.idea/
+
+# Fichiers de sauvegarde
+extraits/
+
+# Fichiers de statistiques
+statistiques/
