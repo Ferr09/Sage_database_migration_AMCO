@@ -201,9 +201,9 @@ Répondez oui ou non pour consulter le README avant de continuer.
 - Exporter la base Access vers des fichiers CSV/Excel
 - Charger directement les fichiers existants dans PostgreSQL
 
-## Option 1 – Export Access
+### Option 1 – Export Access
 
-# Exécution simple :
+#### Exécution simple :
 
 bash
 `python main.py 1`
@@ -222,9 +222,9 @@ Modules exécutés, dans l’ordre :
 - Sage/src/outils/generer_statistiques_tables.py
 - Sage/src/modules/nettoyage_fichiers_csv.py
 
-## Option 2 – Injection PostgreSQL
+### Option 2 – Injection PostgreSQL
 
-# Exécution :
+#### Exécution :
 
 bash
 `python main.py 2`
@@ -239,7 +239,7 @@ Crée ou met à jour config.json en demandant :
 
 Exécute construction_bdd_sql.py pour insérer les données
 
-# Annulation : à tout moment lors d’une invite, tapez :
+#### Annulation : à tout moment lors d’une invite, tapez :
 `sortir`
 
 
