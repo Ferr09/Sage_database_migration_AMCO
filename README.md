@@ -185,6 +185,63 @@ Option recommandée : Git Bash
    make installer
    make lancer
 
+## 🚀 Usage
+1. Positionnez-vous à la racine du projet :
+
+bash
+`cd /chemin/vers/votre-projet`
+Lancez le script principal main.py :
+
+bash
+`python main.py`
+Répondez oui ou non pour consulter le README avant de continuer.
+
+2. Choisissez l’étape de démarrage :
+
+- Exporter la base Access vers des fichiers CSV/Excel
+- Charger directement les fichiers existants dans PostgreSQL
+
+## Option 1 – Export Access
+
+# Exécution simple :
+
+bash
+`python main.py 1`
+Avec chemin personnalisé vers le fichier .accdb :
+
+bash
+`python main.py 1 -a "/chemin/vers/access.accdb"`
+Le script :
+
+> Recherche access.accdb à la racine
+> Sinon, invite à saisir le chemin (tapez sortir pour abandonner)
+
+Modules exécutés, dans l’ordre :
+- Sage/src/modules/extraction_complete_fichiers_csv.py
+- Sage/src/modules/extraction_entetes.py
+- Sage/src/outils/generer_statistiques_tables.py
+- Sage/src/modules/nettoyage_fichiers_csv.py
+
+## Option 2 – Injection PostgreSQL
+
+# Exécution :
+
+bash
+`python main.py 2`
+Le script :
+
+Crée ou met à jour config.json en demandant :
+- Hôte (ex. localhost)
+- Port (ex. 5432)
+- Nom de la base
+- Utilisateur
+- Mot de passe
+
+Exécute construction_bdd_sql.py pour insérer les données
+
+# Annulation : à tout moment lors d’une invite, tapez :
+`sortir`
+
 
 ## 📁 Structure du projet
 
