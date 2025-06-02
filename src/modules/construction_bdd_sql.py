@@ -678,6 +678,7 @@ for nom_logique in ordre_insertion_ventes:
 
     if nom_logique == "comptet_ventes":
         df_filtré = df_filtré.dropna(subset=["CT_NUM"])
+        df_filtré["CT_INTITULE"] = df_filtré["CT_INTITULE"].astype(str)
 
     elif nom_logique == "docligne_ventes":
         df_filtré = df_filtré.dropna(subset=["DL_NO", "AR_REF"])
@@ -688,16 +689,35 @@ for nom_logique in ordre_insertion_ventes:
             .str.strip()
             .str.replace(r"\.0$", "", regex=True)
         )
+
+
+        # Nettoyage des colonnes de type chaîne de caractères
+        df_filtré["CT_NUM"]       = df_filtré["CT_NUM"].astype(str)
+        df_filtré["AC_REFCLIENT"] = df_filtré["AC_REFCLIENT"].astype(str)
+        df_filtré["AR_REF"]       = df_filtré["AR_REF"].astype(str)
+        df_filtré["DL_DESIGN"]    = df_filtré["DL_DESIGN"].astype(str)
+
+        # Conversion des colonnes numériques
+        df_filtré["DL_QTE"]           = pd.to_numeric(df_filtré["DL_QTE"],           errors="coerce")
+        df_filtré["DL_PRIXUNITAIRE"]  = pd.to_numeric(df_filtré["DL_PRIXUNITAIRE"],  errors="coerce")
+        df_filtré["DL_MONTANTHT"]     = pd.to_numeric(df_filtré["DL_MONTANTHT"],     errors="coerce")
+
         ct_comptet = set(tables_ventes["comptet_ventes"]["CT_NUM"]
                          .astype(str).str.strip())
         df_filtré = df_filtré[df_filtré["CT_NUM"].isin(ct_comptet)]
 
     # 3) Supprimer les lignes sans clé primaire
     elif nom_logique == "articles_ventes":
+        # Supprimer les lignes sans clé primaire AR_REF
         df_filtré = df_filtré.dropna(subset=["AR_REF"])
 
-    
+        # Nettoyage des colonnes de type chaîne de caractères
+        df_filtré["AR_REF"] = df_filtré["AR_REF"].astype(str)
 
+    elif nom_logique == "famille_ventes":
+        # Supprimer les lignes sans clé primaire FA_CODEFAMILLE
+        df_filtré["FA_CENTRAL"]  = df_filtré["FA_CENTRAL"].astype(str)
+        df_filtré["FA_INTITULE"] = df_filtré["FA_INTITULE"].astype(str)
 
     # 4) Insertion
     df_filtré.to_sql(
@@ -732,7 +752,11 @@ for nom_logique in ordre_insertion_achats:
 
     # 1) On nettoie COMPTET en premier
     if nom_logique == "comptet_achats":
+        # Supprimer les lignes sans clé primaire CT_NUM
         df_filtré = df_filtré.dropna(subset=["CT_NUM"])
+        # Nettoyage des colonnes de type chaîne de caractères
+        df_filtré["CT_NUM"]      = df_filtré["CT_NUM"].astype(str)
+        df_filtré["CT_INTITULE"] = df_filtré["CT_INTITULE"].astype(str)
 
     elif nom_logique == "docligne_achats":
         df_filtré = df_filtré.dropna(subset=["DL_NO", "AF_REFFOURNISS", "AR_REF"])
@@ -743,6 +767,18 @@ for nom_logique in ordre_insertion_achats:
             .str.strip()
             .str.replace(r"\.0$", "", regex=True)
         )
+
+        # Nettoyage des colonnes de type chaîne de caractères
+        df_filtré["CT_NUM"]       = df_filtré["CT_NUM"].astype(str)
+        df_filtré["AC_REFCLIENT"] = df_filtré["AC_REFCLIENT"].astype(str)
+        df_filtré["AR_REF"]       = df_filtré["AR_REF"].astype(str)
+        df_filtré["DL_DESIGN"]    = df_filtré["DL_DESIGN"].astype(str)
+
+        # Conversion des colonnes numériques
+        df_filtré["DL_QTE"]           = pd.to_numeric(df_filtré["DL_QTE"],           errors="coerce")
+        df_filtré["DL_PRIXUNITAIRE"]  = pd.to_numeric(df_filtré["DL_PRIXUNITAIRE"],  errors="coerce")
+        df_filtré["DL_MONTANTHT"]     = pd.to_numeric(df_filtré["DL_MONTANTHT"],     errors="coerce")
+
         ct_comptet = set(tables_achats["comptet_achats"]["CT_NUM"]
                          .astype(str).str.strip())
         df_filtré = df_filtré[df_filtré["CT_NUM"].isin(ct_comptet)]
@@ -752,13 +788,22 @@ for nom_logique in ordre_insertion_achats:
         df_filtré = df_filtré.dropna(subset=["AF_REFFOURNISS"])
         # 3b) Supprimer les doublons
         df_filtré = df_filtré.drop_duplicates(subset=["AF_REFFOURNISS"])
+        # Nettoyage des colonnes de type chaîne de caractères
+        df_filtré["AF_REFFOURNISS"] = df_filtré["AF_REFFOURNISS"].astype(str)
+
 
     elif nom_logique == "articles_achats":
+        # Supprimer les lignes sans clé primaire AR_REF
         df_filtré = df_filtré.dropna(subset=["AR_REF"])
 
+        # Nettoyage des colonnes de type chaîne de caractères
+        df_filtré["AR_REF"] = df_filtré["AR_REF"].astype(str)
 
 
-    
+    elif nom_logique == "famille_achats":
+        # Supprimer les lignes sans clé primaire FA_CODEFAMILLE
+        df_filtré["FA_CENTRAL"]  = df_filtré["FA_CENTRAL"].astype(str)
+        df_filtré["FA_INTITULE"] = df_filtré["FA_INTITULE"].astype(str)
 
     # 4) Insertion
     df_filtré.to_sql(
