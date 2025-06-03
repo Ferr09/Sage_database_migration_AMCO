@@ -1,3 +1,4 @@
+import unicodedata
 import pandas as pd
 import os
 import json
@@ -554,6 +555,26 @@ def nettoyer_dataframe(df):
     df = df.where(pd.notna(df), None)
     return df
 
+# Fonction pour nettoyer les colonnes de type objet (texte)
+def nettoyer_texte_objet(df):
+    """
+    Nettoie les colonnes de type objet (texte) pour éviter les problèmes d'encodage :
+    - Supprime les caractères non imprimables.
+    - Normalise les accents et caractères spéciaux.
+    - Remplace les chaînes 'nan' par None.
+    """
+    import unicodedata
+
+    for col in df.select_dtypes(include=["object"]).columns:
+        df[col] = (
+            df[col].astype(str)
+                  .replace('nan', None)
+                  .apply(lambda x: unicodedata.normalize('NFKC', x)
+                         .encode('utf-8', errors='replace')
+                         .decode('utf-8', errors='replace') if x else None)
+        )
+    return df
+
 
 #  Créer les tables dans la base de données PostgreSQL
 metadata_achats.create_all(moteur, checkfirst=True)
@@ -582,32 +603,26 @@ fichiers_achats = {
 tables_ventes = {}
 tables_achats = {}
 
-# Dictoinnaire où seront stockés les DataFrames des ventes
+# Charger les fichiers_ventes et achats dans des DataFrames
 for nom_table, nom_fichier in fichiers_ventes.items():
     chemin_complet = os.path.join(chemin_dossier, nom_fichier)
     if os.path.exists(chemin_complet):
         df = pd.read_excel(chemin_complet)
         
-        # Corriger les encodages malins (ex: CT_INTITULE avec accents)
+        # Nettoyer les colonnes texte sans altérer l'encodage
         for col in df.select_dtypes(include=['object']).columns:
-            df[col] = df[col].astype(str).apply(
-                lambda x: x.encode('latin1', errors='ignore').decode('utf-8', errors='replace')
-            )
+            df[col] = df[col].astype(str).str.strip()
 
         tables_ventes[nom_table] = df
 
-#Dictoinnaire où seront stockés les DataFrames des achats
+# Charger les fichiers_achats dans des DataFrames
 for nom_table, nom_fichier in fichiers_achats.items():
     chemin_complet = os.path.join(chemin_dossier, nom_fichier)
-    
     if os.path.exists(chemin_complet):
         df = pd.read_excel(chemin_complet)
 
-        # 🔧 Reparar texto mal codificado: latin1 → utf-8
         for col in df.select_dtypes(include=['object']).columns:
-            df[col] = df[col].astype(str).apply(
-                lambda x: x.encode('latin1', errors='ignore').decode('utf-8', errors='replace')
-            )
+            df[col] = df[col].astype(str).str.strip()
 
         tables_achats[nom_table] = df
     else:
@@ -707,6 +722,9 @@ for nom_logique in ordre_insertion_ventes:
     if nom_logique == "comptet_ventes":
         df_filtré = df_filtré.dropna(subset=["CT_NUM"])
         df_filtré["CT_INTITULE"] = df_filtré["CT_INTITULE"].astype(str)
+        
+        # Nettoyage ciblé
+        df_filtré["CT_INTITULE"] = nettoyer_texte_objet(df_filtré[["CT_INTITULE"]])["CT_INTITULE"]
 
     elif nom_logique == "docligne_ventes":
         df_filtré = df_filtré.dropna(subset=["DL_NO", "AR_REF"])
@@ -717,6 +735,10 @@ for nom_logique in ordre_insertion_ventes:
             .str.strip()
             .str.replace(r"\.0$", "", regex=True)
         )
+
+        # Nettoyage ciblé
+        df_filtré["DL_DESIGN"] = nettoyer_texte_objet(df_filtré[["DL_DESIGN"]])["DL_DESIGN"]
+
 
 
         # Nettoyage des colonnes de type chaîne de caractères
@@ -786,6 +808,9 @@ for nom_logique in ordre_insertion_achats:
         df_filtré["CT_NUM"]      = df_filtré["CT_NUM"].astype(str)
         df_filtré["CT_INTITULE"] = df_filtré["CT_INTITULE"].astype(str)
 
+        # Nettoyage ciblé des colonnes de type chaîne de caractères
+        df_filtré["CT_INTITULE"] = nettoyer_texte_objet(df_filtré[["CT_INTITULE"]])["CT_INTITULE"]
+
     elif nom_logique == "docligne_achats":
         df_filtré = df_filtré.dropna(subset=["DL_NO", "AF_REFFOURNISS", "AR_REF"])
         # Nettoyage et filtrage des clés orphelines
@@ -795,6 +820,9 @@ for nom_logique in ordre_insertion_achats:
             .str.strip()
             .str.replace(r"\.0$", "", regex=True)
         )
+
+        # Nettoyage ciblé des colonnes de type chaîne de caractères
+        df_filtré["DL_DESIGN"] = nettoyer_texte_objet(df_filtré[["DL_DESIGN"]])["DL_DESIGN"]
 
         # Nettoyage des colonnes de type chaîne de caractères
         df_filtré["CT_NUM"]       = df_filtré["CT_NUM"].astype(str)
