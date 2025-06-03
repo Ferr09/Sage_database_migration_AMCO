@@ -542,10 +542,20 @@ docligne_achats = Table(
     Column("RP_CODE", String, quote=True),
 )
 
+# Fonction pour nettoyer les DataFrames
+def nettoyer_dataframe(df):
+    df = df.dropna(axis=1, how="all")  # Supprimer les colonnes entièrement vides
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].replace('nan', None)
+    for col in df.columns:
+        if "DATE" in col.upper():
+            df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
+    df = df.where(pd.notna(df), None)
+    return df
 
 
-
-# Ahora creamos todas las tablas en ambos esquemas de una pasada
+#  Créer les tables dans la base de données PostgreSQL
 metadata_achats.create_all(moteur, checkfirst=True)
 metadata_ventes.create_all(moteur, checkfirst=True)
 
@@ -575,35 +585,53 @@ tables_achats = {}
 # Dictoinnaire où seront stockés les DataFrames des ventes
 for nom_table, nom_fichier in fichiers_ventes.items():
     chemin_complet = os.path.join(chemin_dossier, nom_fichier)
-    
     if os.path.exists(chemin_complet):
-        tables_ventes[nom_table] = pd.read_excel(chemin_complet)
-    else:
-        print(f"Fichier non trouvé : {chemin_complet}")
+        df = pd.read_excel(chemin_complet)
+        
+        # Corriger les encodages malins (ex: CT_INTITULE avec accents)
+        for col in df.select_dtypes(include=['object']).columns:
+            df[col] = df[col].astype(str).apply(
+                lambda x: x.encode('latin1', errors='ignore').decode('utf-8', errors='replace')
+            )
+
+        tables_ventes[nom_table] = df
 
 #Dictoinnaire où seront stockés les DataFrames des achats
 for nom_table, nom_fichier in fichiers_achats.items():
     chemin_complet = os.path.join(chemin_dossier, nom_fichier)
     
     if os.path.exists(chemin_complet):
-        tables_achats[nom_table] = pd.read_excel(chemin_complet)
+        df = pd.read_excel(chemin_complet)
+
+        # 🔧 Reparar texto mal codificado: latin1 → utf-8
+        for col in df.select_dtypes(include=['object']).columns:
+            df[col] = df[col].astype(str).apply(
+                lambda x: x.encode('latin1', errors='ignore').decode('utf-8', errors='replace')
+            )
+
+        tables_achats[nom_table] = df
     else:
         print(f"Fichier non trouvé : {chemin_complet}")
+
 
 
 # Filtrage automatique des colonnes pour ventes (utiliser toutes les colonnes)
 for nom_table in tables_ventes:
     df = tables_ventes[nom_table]
-    df_filtré = df.dropna(axis=1, how="all")  # Enlève les colonnes entièrement vides
+    df_filtré = nettoyer_dataframe(df)
     tables_ventes[nom_table] = df_filtré
-    print(f"Colonnes chargées pour {nom_table} (Ventes) : {df_filtré.columns.tolist()}")
+    print(f"Colonnes nettoyées pour {nom_table} (Ventes) : {df_filtré.columns.tolist()}")
+
+
 
 # Filtrage automatique des colonnes pour achats (utiliser toutes les colonnes)
 for nom_table in tables_achats:
     df = tables_achats[nom_table]
-    df_filtré = df.dropna(axis=1, how="all")
+    df_filtré = nettoyer_dataframe(df)
     tables_achats[nom_table] = df_filtré
-    print(f"Colonnes chargées pour {nom_table} (Achats) : {df_filtré.columns.tolist()}")
+    print(f"Colonnes nettoyées pour {nom_table} (Achats) : {df_filtré.columns.tolist()}")
+
+
 
 # Normaliser les clés AF_REFFOURNISS pour qu'elles correspondent exactement
 # aux valeurs de la table fournisseur_achats
