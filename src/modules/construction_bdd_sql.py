@@ -3,6 +3,16 @@ import pandas as pd
 import os
 import json
 from sqlalchemy import Date, text, Numeric, create_engine, Table, Column, String, Integer, Float, MetaData, ForeignKey
+import importlib.util
+
+# Détection du driver et du port par défaut associé
+def detect_driver_and_port():
+    if importlib.util.find_spec("psycopg2"):
+        return "postgresql+psycopg2", 5432
+    elif importlib.util.find_spec("pymysql"):
+        return "mysql+pymysql", 3306
+    else:
+        raise ImportError("Aucun driver compatible détecté.")
 
 
 # Charger le chemin vers le fichier de configuration
@@ -12,9 +22,16 @@ chemin_config = os.path.join(r"config", "postgres_config.json")
 with open(chemin_config, "r", encoding="utf-8") as fichier:
     config = json.load(fichier)
 
-# Construire l’URL de connexion PostgreSQL
+# Détection automatique
+driver, default_port = detect_driver_and_port()
+
+# Si le port est vide, nul ou générique, on force le port correct selon le SGBD
+if not config.get("db_port") or str(config["db_port"]).strip() in {"", "0", "null"}:
+    config["db_port"] = default_port
+
+# Construction dynamique de l'URL de connexion
 url_connexion = (
-    f"postgresql+psycopg2://{config['db_user']}:{config['db_password']}"
+    f"{driver}://{config['db_user']}:{config['db_password']}"
     f"@{config['db_host']}:{config['db_port']}/{config['db_name']}"
 )
 
@@ -777,7 +794,7 @@ for nom_logique in ordre_insertion_ventes:
         df_filtré[col] = df_filtré[col].apply(
             lambda x: None if pd.isna(x) or str(x).strip() in ['None', 'nan', 'NaN'] else x
         )
-        
+
     # 4) Insertion
     df_filtré.to_sql(
         nom_table_sql,
