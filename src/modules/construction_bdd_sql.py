@@ -769,6 +769,10 @@ for nom_logique in ordre_insertion_ventes:
         df_filtré["FA_CENTRAL"]  = df_filtré["FA_CENTRAL"].astype(str)
         df_filtré["FA_INTITULE"] = df_filtré["FA_INTITULE"].astype(str)
 
+    # Nettoyage final pour éviter les chaînes 'None' littérales
+    for col in df_filtré.columns:
+        df_filtré[col] = df_filtré[col].apply(lambda x: None if x in ['None', 'nan', 'NaN'] else x)
+
     # 4) Insertion
     df_filtré.to_sql(
         nom_table_sql,
@@ -860,6 +864,10 @@ for nom_logique in ordre_insertion_achats:
         # Supprimer les lignes sans clé primaire FA_CODEFAMILLE
         df_filtré["FA_CENTRAL"]  = df_filtré["FA_CENTRAL"].astype(str)
         df_filtré["FA_INTITULE"] = df_filtré["FA_INTITULE"].astype(str)
+
+    # Nettoyage final pour éviter les chaînes 'None' littérales
+    for col in df_filtré.columns:
+        df_filtré[col] = df_filtré[col].apply(lambda x: None if x in ['None', 'nan', 'NaN'] else x)
 
     # 4) Insertion
     df_filtré.to_sql(
