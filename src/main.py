@@ -9,28 +9,41 @@ import venv
 import json
 
 def ensure_venv():
-    """
-    Crée et active un venv local (« .venv ») si aucun venv n'est détecté.
-    Relance le script dans le venv.
-    """
-    if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
-        return
-    chemin_venv = os.path.join(os.getcwd(), '.venv')
-    if not os.path.isdir(chemin_venv):
-        print("Création du venv dans .venv...")
-        venv.create(chemin_venv, with_pip=True)
-    # Activation et relance
-    if os.name == 'nt':
-        activate = os.path.join(chemin_venv, 'Scripts', 'activate_this.py')
+    venv_dir = '.venv'
+    activate_script = os.path.join(venv_dir, 'Scripts', 'activate_this.py')
+
+    if not os.path.isdir(venv_dir):
+        os.system(f'{sys.executable} -m venv {venv_dir}')
+        print("Environnement virtuel créé.")
     else:
-        activate = os.path.join(chemin_venv, 'bin', 'activate_this.py')
-    exec(open(activate).read(), {'__file__': activate})
-    os.execv(sys.executable, [sys.executable] + sys.argv)
+        print("Environnement virtuel déjà présent.")
+
+    version = sys.version_info
+    if version >= (3, 8):
+        print("Python 3.8 ou version ultérieure détectée : aucune activation automatique requise.")
+        return
+    else:
+        if os.path.exists(activate_script):
+            print("Activation de l’environnement virtuel (Python < 3.8)...")
+            exec(open(activate_script).read(), {'__file__': activate_script})
+        else:
+            print("Attention : 'activate_this.py' est introuvable et requis pour Python < 3.8.")
+            sys.exit("Arrêt du script pour éviter une exécution dans un environnement non activé.")
+
+def afficher_readme():
+    readme_path = "README.md"
+    if not os.path.exists(readme_path):
+        print("Le fichier README.md est introuvable.")
+        return
+    with open(readme_path, "r", encoding="utf-8") as f:
+        contenu = f.read()
+        print("\n" + "="*50)
+        print(" CONTENU DU README ")
+        print("="*50)
+        print(contenu)
+        print("="*50 + "\n")
 
 def installer_requirements():
-    """
-    Installe les dépendances depuis requirements.txt.
-    """
     fichier_req = os.path.join(os.getcwd(), "requirements.txt")
     if os.path.isfile(fichier_req):
         print("Installation des dépendances depuis requirements.txt...")
@@ -40,9 +53,6 @@ def installer_requirements():
             sys.exit(result.returncode)
 
 def verifier_driver_access():
-    """
-    Vérifie la présence du driver Access via pyodbc.
-    """
     try:
         import pyodbc
     except ImportError:
@@ -55,29 +65,17 @@ def verifier_driver_access():
         sys.exit(1)
 
 def verifier_fichier(path_fichier):
-    """
-    Vérifie que le fichier spécifié existe.
-    """
     return os.path.isfile(path_fichier)
 
 def demander_chemin(prompt):
-    """
-    Demande interactivement une entrée utilisateur avec un prompt donné.
-    """
     return input(f"{prompt}").strip()
 
 def lancer_module(command):
-    """
-    Lance un module Python via subprocess et interrompt si erreur.
-    """
     result = subprocess.run(command)
     if result.returncode != 0:
         raise RuntimeError(f"Échec du module : {' '.join(command)}")
 
 def config_postgres():
-    """
-    Demande les paramètres PostgreSQL et crée ou recrée un fichier config.json.
-    """
     cfg_path = os.path.join(os.getcwd(), 'config.json')
     if os.path.isfile(cfg_path):
         overwrite = input("Un config.json existe déjà. Supprimer et recréer ? (oui/non) : ").strip().lower()
@@ -112,8 +110,8 @@ def main():
     # 2. Lecture optionnelle du README
     lire_readme = input("Voulez-vous consulter le README avant de continuer ? (oui/non) : ").strip().lower()
     if lire_readme in ('oui', 'o'):
-        print("Ouvrez README.md et relancez ce script une fois prêt.")
-        sys.exit(0)
+        afficher_readme()
+        input("Appuyez sur Entrée pour continuer...")
 
     # 3. Choix de l'étape de départ
     print("Choisissez une option :")
