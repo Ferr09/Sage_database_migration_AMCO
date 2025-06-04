@@ -131,7 +131,6 @@ def main():
         else:
             # Dossier contenant les .accdb
             dossier_access = os.path.join(os.getcwd(), "db_sage_access")
-
             # Chercher un fichier .accdb dans ce dossier
             if os.path.isdir(dossier_access):
                 fichiers = [f for f in os.listdir(dossier_access) if f.endswith(".accdb")]
@@ -149,7 +148,7 @@ def main():
                         path_access = chemin
                         break
         os.environ["ACCESS_FILE"] = os.path.abspath(path_access)
-        lancer_module([sys.executable, "src/modules/extraction_complete_fichiers_csv.py"])
+        lancer_module([sys.executable, "src/modules/extraction_complete_access.py"])
         lancer_module([sys.executable, "src/modules/extraction_entetes.py"])
         lancer_module([sys.executable, "src/outils/generer_statistiques_tables.py"])
         lancer_module([sys.executable, "src/modules/nettoyage_fichiers_csv.py"])

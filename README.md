@@ -165,9 +165,11 @@ jq --version
 ## 🚀 Installation rapide du projet
 
 1. Cloner le projet :
-   git clone https://github.com/utilisateur/mon_projet.git
-   cd mon_projet
+   git clone https://github.com/Ferr09/Sage_database_migration_AMCO.git 
+   cd Sage_database_migration_AMCO
 
+### Si vous n'avez pas Linux ou une interface Linux sur Windows, alors n'utilisez pas les modules make
+### Passez par l'execution main.py
 2. Installer l’environnement :
    make installer
 
@@ -189,11 +191,7 @@ Option recommandée : Git Bash
 1. Positionnez-vous à la racine du projet :
 
 bash
-`cd /chemin/vers/votre-projet`
-Lancez le script principal main.py :
-
-bash
-`python main.py`
+`python src/main.py`
 Répondez oui ou non pour consulter le README avant de continuer.
 
 2. Choisissez l’étape de démarrage :
