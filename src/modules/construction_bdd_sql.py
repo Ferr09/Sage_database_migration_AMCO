@@ -769,10 +769,15 @@ for nom_logique in ordre_insertion_ventes:
         df_filtré["FA_CENTRAL"]  = df_filtré["FA_CENTRAL"].astype(str)
         df_filtré["FA_INTITULE"] = df_filtré["FA_INTITULE"].astype(str)
 
-    # Nettoyage final pour éviter les chaînes 'None' littérales
-    for col in df_filtré.columns:
-        df_filtré[col] = df_filtré[col].apply(lambda x: None if x in ['None', 'nan', 'NaN'] else x)
+    # Assure une copie pour éviter le SettingWithCopyWarning
+    df_filtré = df_filtré.copy()
 
+    # Nettoyage final pour convertir les chaînes 'None', 'nan', 'NaN' ou valeurs manquantes
+    for col in df_filtré.columns:
+        df_filtré[col] = df_filtré[col].apply(
+            lambda x: None if pd.isna(x) or str(x).strip() in ['None', 'nan', 'NaN'] else x
+        )
+        
     # 4) Insertion
     df_filtré.to_sql(
         nom_table_sql,
@@ -865,9 +870,14 @@ for nom_logique in ordre_insertion_achats:
         df_filtré["FA_CENTRAL"]  = df_filtré["FA_CENTRAL"].astype(str)
         df_filtré["FA_INTITULE"] = df_filtré["FA_INTITULE"].astype(str)
 
-    # Nettoyage final pour éviter les chaînes 'None' littérales
+    # Assure une copie pour éviter le SettingWithCopyWarning
+    df_filtré = df_filtré.copy()
+
+    # Nettoyage final pour convertir les chaînes 'None', 'nan', 'NaN' ou valeurs manquantes
     for col in df_filtré.columns:
-        df_filtré[col] = df_filtré[col].apply(lambda x: None if x in ['None', 'nan', 'NaN'] else x)
+        df_filtré[col] = df_filtré[col].apply(
+            lambda x: None if pd.isna(x) or str(x).strip() in ['None', 'nan', 'NaN'] else x
+        )
 
     # 4) Insertion
     df_filtré.to_sql(
