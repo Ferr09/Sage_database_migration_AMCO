@@ -76,7 +76,7 @@ def lancer_module(command):
         raise RuntimeError(f"Échec du module : {' '.join(command)}")
 
 def config_postgres():
-    cfg_path = os.path.join(os.getcwd(), 'config.json')
+    cfg_path = os.path.join(os.getcwd(), 'config/postgres_config.json')
     if os.path.isfile(cfg_path):
         overwrite = input("Un config.json existe déjà. Supprimer et recréer ? (oui/non) : ").strip().lower()
         if overwrite in ('oui', 'o'):
@@ -91,12 +91,13 @@ def config_postgres():
         return False
 
     cfg = {
-        'host':     input("Hôte PostgreSQL (ex: localhost) : ").strip(),
-        'port':     input("Port (ex: 5432) : ").strip(),
-        'dbname':   input("Nom de la base : ").strip(),
-        'user':     input("Utilisateur : ").strip(),
-        'password': input("Mot de passe : ").strip()
+        'db_host':     input("Hôte PostgreSQL (ex: localhost) : ").strip(),
+        'db_port':     input("Port (ex: 5432) : ").strip(),
+        'db_name':   input("Nom de la base : ").strip(),
+        'db_user':     input("Utilisateur : ").strip(),
+        'db_password': input("Mot de passe : ").strip()
     }
+
     with open(cfg_path, 'w', encoding='utf-8') as f:
         json.dump(cfg, f, indent=4)
     print("config.json créé.")
@@ -154,7 +155,7 @@ def main():
             print("Fin sans injection PostgreSQL.")
             break
         try:
-            lancer_module([sys.executable, "construction_bdd_sql.py"])
+            lancer_module([sys.executable, "src/modules/construction_bdd_sql.py"])
             print("Injection réussie.")
             break
         except RuntimeError as e:
