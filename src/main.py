@@ -129,10 +129,15 @@ def main():
         if args.access_file and verifier_fichier(args.access_file):
             path_access = args.access_file
         else:
-            default = os.path.join(os.getcwd(), "tables_sage_hyperix.accdb")
-            if os.path.isfile(default) and verifier_fichier(default):
-                path_access = default
-                print(f"Fichier .accdb trouvé : {default}")
+            # Dossier contenant les .accdb
+            dossier_access = os.path.join(os.getcwd(), "db_sage_access")
+
+            # Chercher un fichier .accdb dans ce dossier
+            if os.path.isdir(dossier_access):
+                fichiers = [f for f in os.listdir(dossier_access) if f.endswith(".accdb")]
+                if fichiers:
+                    path_access = os.path.join(dossier_access, fichiers[0])
+                    print(f"Fichier .accdb trouvé : {path_access}")
             else:
                 print("Aucune configuration trouvée. Tapez 'sortir' pour abandonner.")
                 while True:
