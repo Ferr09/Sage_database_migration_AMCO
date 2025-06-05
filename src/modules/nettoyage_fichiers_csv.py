@@ -1,21 +1,28 @@
-import os
-import pandas as pd
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import re
+import pandas as pd
+from pathlib import Path
+import os
 
-# === Dossiers ===
-dossier_source = r"extraits/csv_extraits"  # Dossier contenant les .csv        
-dossier_sortie = r"extraits/xlsx_propres"             # Dossier pour stocker les .xlsx
+# --------------------------------------------------------------------
+# Importation des chemins absolus depuis chemins.py
+# --------------------------------------------------------------------
+from outils.chemins import dossier_csv_extraits, dossier_xlsx_propres
 
-# Vérification du dossier source
-if not os.path.isdir(dossier_source):
-    raise FileNotFoundError(f"Le dossier source n'existe pas : {os.path.abspath(dossier_source)}")
+# --------------------------------------------------------------------
+# Vérification du dossier source et création du dossier de sortie
+# --------------------------------------------------------------------
+if not dossier_csv_extraits.is_dir():
+    raise FileNotFoundError(f"Le dossier source n'existe pas : {dossier_csv_extraits}")
 
 # Création du dossier de sortie s’il n’existe pas
-os.makedirs(dossier_sortie, exist_ok=True)
+dossier_xlsx_propres.mkdir(parents=True, exist_ok=True)
 
-
-
-# === Configuration facultative (types, monnaies, dtype personnalisés)
+# --------------------------------------------------------------------
+# Configuration facultative (types, monnaies, dtype personnalisés)
+# --------------------------------------------------------------------
 types_tables = {
     "F_DOCENTETE": {
         "DO_DATE": "datetime",
@@ -44,33 +51,35 @@ dtype_tables = {
     }
 }
 
-
 def convertir_col_excel(index):
-    """Convertit un index de colonne (0-based) en lettre Excel (A, B, ..., AA, AB...)"""
+    """
+    Convertit un index de colonne (0-based) en lettre Excel (A, B, ..., AA, AB...)
+    """
     result = ""
     while index >= 0:
         result = chr(index % 26 + ord('A')) + result
         index = index // 26 - 1
     return result
 
-# === Fonction principale
-def nettoyer_et_exporter_csv(chemin_csv, nom_table):
+# --------------------------------------------------------------------
+# Fonction principale de nettoyage et export
+# --------------------------------------------------------------------
+def nettoyer_et_exporter_csv(chemin_csv: Path, nom_table: str):
     try:
-        # Lecture CSV
+        # Lecture du fichier CSV
         dtype = dtype_tables.get(nom_table, None)
         df = pd.read_csv(chemin_csv, encoding="utf-8-sig", dtype=dtype, low_memory=False)
 
-        # Nettoyage : suppression lignes vides ou nulles/0
+        # Nettoyage : suppression des lignes entièrement vides ou nulles/0
         df_clean = df.dropna(how='all')
         df_clean = df_clean.loc[~(df_clean.isna() | (df_clean == 0)).all(axis=1)]
 
-        # Cas particulier : on supprime les lignes sans AF_REFFOURNISS
+        # Cas particulier : suppression des lignes sans AF_REFFOURNISS pour F_ARTFOURNISS
         if nom_table == "F_ARTFOURNISS":
             before = len(df_clean)
             df_clean = df_clean[df_clean["AF_REFFOURNISS"].notna()]
             removed = before - len(df_clean)
             print(f"{nom_table} : {removed} ligne(s) sans AF_REFFOURNISS supprimée(s)")
-
 
         # Cas particulier : F_DOCLIGNE extraction du n° de BL
         if nom_table == "F_DOCLIGNE":
@@ -84,6 +93,7 @@ def nettoyer_et_exporter_csv(chemin_csv, nom_table):
                         if match:
                             return match.group(1)
                     return val
+
                 ancienne = df_clean["DL_PIECEBL"].copy()
                 df_clean["DL_PIECEBL"] = df_clean.apply(extraire_bl, axis=1)
                 lignes_modifiees = (ancienne.isna() | (ancienne == "")) & (ancienne != df_clean["DL_PIECEBL"])
@@ -108,7 +118,7 @@ def nettoyer_et_exporter_csv(chemin_csv, nom_table):
             return
 
         # Export vers Excel
-        chemin_excel = os.path.join(dossier_sortie, f"{nom_table}_propre.xlsx")
+        chemin_excel = dossier_xlsx_propres / f"{nom_table}_propre.xlsx"
         with pd.ExcelWriter(chemin_excel, engine="xlsxwriter") as writer:
             df_clean.to_excel(writer, index=False, sheet_name="Données")
             workbook = writer.book
@@ -129,11 +139,16 @@ def nettoyer_et_exporter_csv(chemin_csv, nom_table):
     except Exception as e:
         print(f"Erreur pour {nom_table} : {e}")
 
-# === Exécution pour tous les CSV du dossier
-fichiers = [f for f in os.listdir(dossier_source) if f.endswith(".csv")]
-print(f"Détection de {len(fichiers)} fichiers CSV")
+# --------------------------------------------------------------------
+# Exécution pour tous les CSV du dossier source
+# --------------------------------------------------------------------
+def main():
+    fichiers = [f for f in dossier_csv_extraits.iterdir() if f.suffix.lower() == ".csv"]
+    print(f"Détection de {len(fichiers)} fichiers CSV dans {dossier_csv_extraits}")
 
-for fichier in fichiers:
-    nom_table = os.path.splitext(fichier)[0]
-    chemin_csv = os.path.join(dossier_source, fichier)
-    nettoyer_et_exporter_csv(chemin_csv, nom_table)
+    for fichier in fichiers:
+        nom_table = fichier.stem
+        nettoyer_et_exporter_csv(fichier, nom_table)
+
+if __name__ == "__main__":
+    main()
