@@ -10,18 +10,10 @@ import json
 from pathlib import Path
 
 # --------------------------------------------------------------------
-# 1. Importer la racine du projet (depuis modèles.chemins)
+# 1. Importer la racine du projet et les chemins absolus via outils.chemins
 # --------------------------------------------------------------------
-# On suppose que models/chemins.py définit quelque chose comme :
-# racine_projet = Path(__file__).resolve().parents[2]
-# dossier_config = racine_projet / "config"
-# dossier_modules = racine_projet / "src" / "modules"
-# dossier_outils = racine_projet / "src" / "outils"
-# dossier_db_access = racine_projet / "db_sage_access"
-# dossier_csv_extraits = racine_projet / "extraits" / "csv_extraits"
-# dossier_xlsx_propres = racine_projet / "extraits" / "xlsx_propres"
-# etc.
-
+# (on part du principe que src/outils/chemins.py définit racine_projet, dossier_config, etc.)
+#
 from outils.chemins import (
     racine_projet,
     dossier_config,
@@ -38,14 +30,14 @@ from outils.chemins import (
 def ensure_venv():
     """
     Crée l’environnement virtuel `.venv` à la racine du projet si inexistant.
-    Pour Python ≥ 3.8, on n’a pas besoin d’activer manuellement.
+    Pour Python ≥ 3.8, pas d’activation manuelle nécessaire.
     """
     venv_dir = racine_projet / ".venv"
     activate_script = venv_dir / "Scripts" / "activate_this.py"
 
     if not venv_dir.is_dir():
         # Création de l’environnement virtuel
-        os.system(f"{sys.executable} -m venv {venv_dir}")
+        os.system(f"{sys.executable} -m venv \"{venv_dir}\"")
         print("Environnement virtuel créé.")
     else:
         print("Environnement virtuel déjà présent.")
@@ -57,7 +49,10 @@ def ensure_venv():
     else:
         if activate_script.exists():
             print("Activation de l’environnement virtuel (Python < 3.8)…")
-            exec(open(activate_script).read(), {"__file__": str(activate_script)})
+            exec(
+                open(activate_script, "r", encoding="utf-8").read(),
+                {"__file__": str(activate_script)}
+            )
         else:
             print("Attention : 'activate_this.py' introuvable pour Python < 3.8.")
             sys.exit("Arrêt du script pour éviter une exécution hors venv.")
@@ -66,18 +61,26 @@ def mise_a_jour_systeme():
     """
     Met à jour pip, setuptools et wheel avant d’installer les dépendances.
     """
-    subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"],
+        check=True
+    )
 
 def installer_requirements():
     """
-    Installe les dépendances globales du projet à partir de requirements.txt à la racine.
+    Installe les dépendances globales du projet depuis requirements.txt à la racine.
     """
     fichier_req = racine_projet / "requirements.txt"
     if fichier_req.is_file():
         print("Installation des dépendances depuis requirements.txt…")
-        result = subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(fichier_req)])
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-r", str(fichier_req)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT
+        )
         if result.returncode != 0:
             print("Erreur : échec de l'installation des dépendances.", file=sys.stderr)
+            print(result.stdout.decode("utf-8"), file=sys.stderr)
             sys.exit(result.returncode)
 
 def installer_requirements_chargement(db_type: str):
@@ -96,9 +99,14 @@ def installer_requirements_chargement(db_type: str):
 
     if fichier_req.is_file():
         print(f"Installation des dépendances pour le chargement ({fichier_req.name})…")
-        result = subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(fichier_req)])
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-r", str(fichier_req)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT
+        )
         if result.returncode != 0:
             print("Erreur : échec de l’installation des dépendances de chargement.", file=sys.stderr)
+            print(result.stdout.decode("utf-8"), file=sys.stderr)
             sys.exit(result.returncode)
     else:
         print(f"Fichier {fichier_req.name} introuvable dans {racine_projet}.", file=sys.stderr)
@@ -135,7 +143,7 @@ def demander_chemin(prompt: str) -> str:
     """
     return input(f"{prompt}").strip()
 
-def config_bdd() -> (str, bool): # type: ignore
+def config_bdd() -> (str, bool):  # type: ignore
     """
     Interroge l’utilisateur pour savoir s’il veut charger dans PostgreSQL ou MySQL,
     lit (ou crée) le fichier de configuration JSON adéquat.
@@ -156,7 +164,9 @@ def config_bdd() -> (str, bool): # type: ignore
 
     # 2) Si le config existe déjà, demande si on le recrée
     if chemin_cfg.exists():
-        overwrite = input(f"Le fichier {config_filename} existe déjà. Le supprimer et recréer ? (oui/non) : ").strip().lower()
+        overwrite = input(
+            f"Le fichier {config_filename} existe déjà. Le supprimer et recréer ? (oui/non) : "
+        ).strip().lower()
         if overwrite in ("oui", "o"):
             chemin_cfg.unlink()
             print(f"Ancien {config_filename} supprimé.")
@@ -175,17 +185,22 @@ def config_bdd() -> (str, bool): # type: ignore
     cfg["db_user"] = input("Utilisateur : ").strip()
     cfg["db_password"] = input("Mot de passe : ").strip()
 
+    # S’assure que le répertoire de config existe
+    if not dossier_config.exists():
+        os.makedirs(dossier_config, exist_ok=True)
+
     with open(chemin_cfg, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=4)
     print(f"{config_filename} créé dans {dossier_config}.")
     return db_type, True
 
 # --------------------------------------------------------------------
-# 4. Fonction pour lancer un module externe en utilisant chemins absolus
+# 4. Fonction pour lancer un module externe EN MODE « - m »
 # --------------------------------------------------------------------
 def lancer_module(command: list):
     """
-    Exécute un sous-processus (module Python) ; lève RuntimeError si échec.
+    Exécute un sous-processus (module Python ou script). 
+    Lève RuntimeError si échec.
     """
     result = subprocess.run(command)
     if result.returncode != 0:
@@ -226,7 +241,7 @@ def main():
 
     # 3) Choix de l’étape de départ (1 : extraction Access → CSV, 2 : injection en base)
     print("Choisissez une option :")
-    print("1. Exporter la base Access vers fichiers CSV intermédires")
+    print("1. Exporter la base Access vers fichiers CSV intermédiaires")
     print("2. Charger directement dans la base (si fichiers déjà générés)")
     choix_etape = input("Votre choix (1/2) : ").strip()
 
@@ -237,7 +252,7 @@ def main():
         verifier_driver_access()
 
         # 4.a) Optionnel : argument -a ou --access-file
-        parser = argparse.ArgumentParser(description="Pipeline Access - chemin facultatif")
+        parser = argparse.ArgumentParser(description="Pipeline Access – chemin facultatif")
         parser.add_argument("-a", "--access-file", help="Chemin vers le .accdb")
         args, _ = parser.parse_known_args()
 
@@ -283,23 +298,31 @@ def main():
         # On stocke la variable d’environnement pour les modules suivants
         os.environ["ACCESS_FILE"] = str(path_access.resolve())
 
-        # 4.b) Appel de chaque module, avec chemin absolu
-        # ─────────────────────────────────────────────────
-        # extraction_complete_access.py
-        module1 = dossier_modules / "extraction_complete_access.py"
-        lancer_module([sys.executable, str(module1)])
+        # 4.b) Appel de chaque module VIA `-m src.modules.*` ou `-m src.outils.*`
+        # ─────────────────────────────────────────────────────────────────
+        print("Lancement du module : src.modules.extraction_complete_access…")
+        lancer_module([
+            sys.executable,
+            "-m", "src.modules.extraction_complete_access"
+        ])
 
-        # extraction_entetes.py
-        module2 = dossier_modules / "extraction_entetes.py"
-        lancer_module([sys.executable, str(module2)])
+        print("Lancement du module : src.modules.extraction_entetes…")
+        lancer_module([
+            sys.executable,
+            "-m", "src.modules.extraction_entetes"
+        ])
 
-        # generer_statistiques_tables.py (dans src/outils/)
-        module3 = dossier_outils / "generer_statistiques_tables.py"
-        lancer_module([sys.executable, str(module3)])
+        print("Lancement du module : src.outils.generer_statistiques_tables…")
+        lancer_module([
+            sys.executable,
+            "-m", "src.outils.generer_statistiques_tables"
+        ])
 
-        # nettoyage_fichiers_csv.py
-        module4 = dossier_modules / "nettoyage_fichiers_csv.py"
-        lancer_module([sys.executable, str(module4)])
+        print("Lancement du module : src.modules.nettoyage_fichiers_csv…")
+        lancer_module([
+            sys.executable,
+            "-m", "src.modules.nettoyage_fichiers_csv"
+        ])
 
     # ------------------------------------------------------------
     # 5) Étape 2 : injection en base (PostgreSQL ou MySQL)
@@ -313,10 +336,15 @@ def main():
         # 5.a) Installer seulement les dépendances de chargement
         installer_requirements_chargement(db_type)
 
-        # 5.b) Lancer le module de construction de la BDD avec argument --db-type
-        module_cci = dossier_modules / "construction_bdd_sql.py"
+        # 5.b) Lancer le module de construction de la BDD en MODE `-m src.modules.construction_bdd_sql`
+        print(f"Lancement du module : src.modules.construction_bdd_sql – db_type = {db_type}")
+        module_cci = "src.modules.construction_bdd_sql"
         try:
-            lancer_module([sys.executable, str(module_cci), "--db-type", db_type])
+            lancer_module([
+                sys.executable,
+                "-m", module_cci,
+                "--db-type", db_type
+            ])
             print("Injection réussie.")
             break
         except RuntimeError as e:
