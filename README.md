@@ -72,8 +72,6 @@ python3 --version
    # sous Windows
    .venv\Scripts\activate
 
-   pip install -r requirements.txt
-
 
 ## 📥 Installation du pilote Microsoft Access (obligatoire)
 
@@ -191,7 +189,7 @@ Option recommandée : Git Bash
 1. Positionnez-vous à la racine du projet :
 
 bash
-`python src/main.py`
+`python -m src.main`
 Répondez oui ou non pour consulter le README avant de continuer.
 
 2. Choisissez l’étape de démarrage :
@@ -204,11 +202,11 @@ Répondez oui ou non pour consulter le README avant de continuer.
 #### Exécution simple :
 
 bash
-`python main.py 1`
+`python - m src.main 1`
 Avec chemin personnalisé vers le fichier .accdb :
 
 bash
-`python main.py 1 -a "/chemin/vers/access.accdb"`
+`python -m src.main 1 -a "/chemin/vers/access.accdb"`
 Le script :
 
 > Recherche access.accdb à la racine
@@ -225,7 +223,7 @@ Modules exécutés, dans l’ordre :
 #### Exécution :
 
 bash
-`python main.py 2`
+`python -m src.main 2`
 Le script :
 
 Crée ou met à jour config.json en demandant :
