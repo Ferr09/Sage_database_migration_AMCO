@@ -8,7 +8,7 @@ import os
 # --------------------------------------------------------------------
 # Importation des chemins absolus depuis chemins.py
 # --------------------------------------------------------------------
-from outils.chemins import dossier_csv_extraits, dossier_xlsx_propres, racine_projet
+from src.outils.chemins import dossier_csv_extraits, dossier_xlsx_propres, racine_projet
 
 # --------------------------------------------------------------------
 # Définition des dossiers source et sortie en chemins absolus

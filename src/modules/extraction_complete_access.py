@@ -9,7 +9,7 @@ import os
 # --------------------------------------------------------------------
 # Importation des chemins absolus depuis outils.chemins
 # --------------------------------------------------------------------
-from outils.chemins import racine_projet, dossier_csv_extraits
+from src.outils.chemins import racine_projet, dossier_csv_extraits
 
 # --------------------------------------------------------------------
 # Paramètres utilisateur basés sur des chemins absolus

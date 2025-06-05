@@ -13,7 +13,7 @@ import argparse
 # --------------------------------------------------------------------
 # Importation des métadonnées et définitions de tables depuis models.tables
 # --------------------------------------------------------------------
-from models.tables import (
+from src.models.tables import (
     metadata_ventes, metadata_achats,
     famille_ventes, articles_ventes, comptet_ventes, docligne_ventes,
     famille_achats, articles_achats, comptet_achats, fournisseur_achats, docligne_achats

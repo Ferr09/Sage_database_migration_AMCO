@@ -14,7 +14,7 @@ from pathlib import Path
 # --------------------------------------------------------------------
 # (on part du principe que src/outils/chemins.py définit racine_projet, dossier_config, etc.)
 #
-from outils.chemins import (
+from src.outils.chemins import (
     racine_projet,
     dossier_config,
     dossier_modules,

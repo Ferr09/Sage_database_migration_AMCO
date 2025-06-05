@@ -1,418 +1,514 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import unicodedata
-import pandas as pd
-import json
-from pathlib import Path
-from sqlalchemy import Date, text, Numeric, create_engine, Table, Column, String, MetaData, ForeignKey, Float as SQLFloat
-from sqlalchemy.exc import SQLAlchemyError
-import importlib.util
-import argparse
+from sqlalchemy import (
+    MetaData, Table, Column, String, Numeric, Date, Integer, ForeignKey
+)
+
+from src.outils.chemins import dossier_config, dossier_xlsx_propres
+
 
 # --------------------------------------------------------------------
-# Importation des métadonnées et définitions de tables depuis models.tables
+# Déclaration des métadonnées pour chaque schéma
 # --------------------------------------------------------------------
-from models.tables import (
-    metadata_ventes, metadata_achats,
-    famille_ventes, articles_ventes, comptet_ventes, docligne_ventes,
-    famille_achats, articles_achats, comptet_achats, fournisseur_achats, docligne_achats
+metadata_ventes  = MetaData(schema="Ventes")
+metadata_achats  = MetaData(schema="Achats")
+
+# --------------------------------------------------------------------
+# Création des tables Ventes
+# --------------------------------------------------------------------
+
+# Table : FAMILLE (Ventes)
+famille_ventes = Table(
+    "FAMILLE", metadata_ventes,
+    Column("FA_CODEFAMILLE", String, primary_key=True, quote=True),
+    Column("FA_CENTRAL",   String, quote=True),
+    Column("FA_INTITULE",  String, nullable=False, quote=True)
+)
+
+# Table : ARTICLES (Ventes)
+articles_ventes = Table(
+    "ARTICLES", metadata_ventes,
+    Column("AR_REF",     String, primary_key=True, quote=True),
+    Column("AR_DESIGN",  String, quote=True),
+    Column("AR_PRIXACH", Numeric(10, 2), quote=True),
+    Column("FA_CODEFAMILLE", String, ForeignKey("Ventes.FAMILLE.FA_CODEFAMILLE"), quote=True)
+)
+
+# Table : COMPTET (Ventes)
+comptet_ventes = Table(
+    "COMPTET", metadata_ventes,
+    Column("CT_NUM",  String, primary_key=True, quote=True),
+    Column("CT_INTITULE", String, quote=True),
+    Column("BT_NUM",  String, quote=True),
+    Column("CA_NUM",  String, quote=True),
+    Column("CA_NUMIFRS", String, quote=True),
+    Column("CBCREATEUR", String, quote=True),
+    Column("CBMODIFICATION", String, quote=True),
+    Column("CBREPLICATION", String, quote=True),
+    Column("CG_NUMPRINC", String, quote=True),
+    Column("CODE_HYPERIX_CHEZ_LE_CLIENT", String, quote=True),
+    Column("CO_NO", String, quote=True),
+    Column("CT_ADRESSE", String, quote=True),
+    Column("CT_APE", String, quote=True),
+    Column("CT_ASSURANCE", String, quote=True),
+    Column("CT_BLFACT", String, quote=True),
+    Column("CT_CLASSEMENT", String, quote=True),
+    Column("CT_CODEPOSTAL", String, quote=True),
+    Column("CT_CODEREGION", String, quote=True),
+    Column("CT_COFACE", String, quote=True),
+    Column("CT_COMMENTAIRE", String, quote=True),
+    Column("CT_COMPLEMENT", String, quote=True),
+    Column("CT_CONTACT", String, quote=True),
+    Column("CT_CONTROLENC", String, quote=True),
+    Column("CT_DATECREATE", String, quote=True),
+    Column("CT_DATEFERMEDEBUT", String, quote=True),
+    Column("CT_DATEFERMEFIN", String, quote=True),
+    Column("CT_EDI1", String, quote=True),
+    Column("CT_EDI2", String, quote=True),
+    Column("CT_EDI3", String, quote=True),
+    Column("CT_EMAIL", String, quote=True),
+    Column("CT_ENCOURS", String, quote=True),
+    Column("CT_FACTURE", String, quote=True),
+    Column("CT_FACTUREELEC", String, quote=True),
+    Column("CT_IDENTIFIANT", String, quote=True),
+    Column("CT_LANGUE", String, quote=True),
+    Column("CT_LETTRAGE", String, quote=True),
+    Column("CT_LIVRPARTIELLE", String, quote=True),
+    Column("CT_NOTPENAL", String, quote=True),
+    Column("CT_NOTRAPPEL", String, quote=True),
+    Column("CT_NUMCENTRALE", String, quote=True),
+    Column("CT_NUMPAYEUR", String, quote=True),
+    Column("CT_PAYS", String, quote=True),
+    Column("CT_PRIORITELIVR", String, quote=True),
+    Column("CT_QUALITE", String, quote=True),
+    Column("CT_RACCOURCI", String, quote=True),
+    Column("CT_REPRESENTINT", String, quote=True),
+    Column("CT_REPRESENTNIF", String, quote=True),
+    Column("CT_SAUT", String, quote=True),
+    Column("CT_SIRET", String, quote=True),
+    Column("CT_SITE", String, quote=True),
+    Column("CT_SOMMEIL", String, quote=True),
+    Column("CT_STATISTIQUE01", String, quote=True),
+    Column("CT_STATISTIQUE02", String, quote=True),
+    Column("CT_STATISTIQUE03", String, quote=True),
+    Column("CT_STATISTIQUE04", String, quote=True),
+    Column("CT_STATISTIQUE05", String, quote=True),
+    Column("CT_STATISTIQUE06", String, quote=True),
+    Column("CT_STATISTIQUE07", String, quote=True),
+    Column("CT_STATISTIQUE08", String, quote=True),
+    Column("CT_STATISTIQUE09", String, quote=True),
+    Column("CT_STATISTIQUE10", String, quote=True),
+    Column("CT_SURVEILLANCE", String, quote=True),
+    Column("CT_SVCA", String, quote=True),
+    Column("CT_SVCOTATION", String, quote=True),
+    Column("CT_SVDATEBILAN", String, quote=True),
+    Column("CT_SVDATECREATE", String, quote=True),
+    Column("CT_SVDATEINCID", String, quote=True),
+    Column("CT_SVDATEMAJ", String, quote=True),
+    Column("CT_SVEFFECTIF", String, quote=True),
+    Column("CT_SVFORMEJURI", String, quote=True),
+    Column("CT_SVINCIDENT", String, quote=True),
+    Column("CT_SVNBMOISBILAN", String, quote=True),
+    Column("CT_SVOBJETMAJ", String, quote=True),
+    Column("CT_SVPRIVIL", String, quote=True),
+    Column("CT_SVREGUL", String, quote=True),
+    Column("CT_SVRESULTAT", String, quote=True),
+    Column("CT_TAUX01", String, quote=True),
+    Column("CT_TAUX02", String, quote=True),
+    Column("CT_TAUX03", String, quote=True),
+    Column("CT_TAUX04", String, quote=True),
+    Column("CT_TELECOPIE", String, quote=True),
+    Column("CT_TELEPHONE", String, quote=True),
+    Column("CT_TYPE", String, quote=True),
+    Column("CT_TYPENIF", String, quote=True),
+    Column("CT_VALIDECH", String, quote=True),
+    Column("CT_VILLE", String, quote=True),
+    Column("DE_NO", String, quote=True),
+    Column("EB_NO", String, quote=True),
+    Column("INT_ANALYTIQUE", String, quote=True),
+    Column("INT_CATCOMPTA", String, quote=True),
+    Column("INT_CATTARIF", String, quote=True),
+    Column("INT_CONDITION", String, quote=True),
+    Column("INT_DEVISE", String, quote=True),
+    Column("INT_EXPEDITION", String, quote=True),
+    Column("INT_PERIOD", String, quote=True),
+    Column("INT_RISQUE", String, quote=True),
+    Column("MR_NO", String, quote=True),
+    Column("N_ANALYTIQUE", String, quote=True),
+    Column("N_ANALYTIQUEIFRS", String, quote=True),
+    Column("N_CATCOMPTA", String, quote=True),
+    Column("N_CATTARIF", String, quote=True),
+    Column("N_CONDITION", String, quote=True),
+    Column("N_DEVISE", String, quote=True),
+    Column("N_EXPEDITION", String, quote=True),
+    Column("N_PERIOD", String, quote=True),
+    Column("N_RISQUE", String, quote=True)
+)
+
+# Table : DOCLIGNE (Ventes)
+docligne_ventes = Table(
+    "DOCLIGNE", metadata_ventes,
+    Column("DL_NO", String, primary_key=True, quote=True),
+    Column("AC_REFCLIENT", String, quote=True),
+    Column("AG_NO1", String, quote=True),
+    Column("AG_NO2", String, quote=True),
+    Column("AR_REF", String, ForeignKey("Ventes.ARTICLES.AR_REF"), quote=True),
+    Column("AR_REFCOMPOSE", String, quote=True),
+    Column("CA_NUM", String, quote=True),
+    Column("CO_NO", String, quote=True),
+    Column("CT_NUM", String, ForeignKey("Ventes.COMPTET.CT_NUM"), quote=True),
+    Column("DE_NO", String, quote=True),
+    Column("DLC", String, quote=True),
+    Column("DLD", String, quote=True),
+    Column("DL_CMUP", Numeric(10, 2), quote=True),
+    Column("DL_DATEAVANCEMENT", String, quote=True),
+    Column("DL_DATEBC", Date, quote=True),
+    Column("DL_DATEBL", Date, quote=True),
+    Column("DL_DATEPL", String, quote=True),
+    Column("DL_DESIGN", String, quote=True),
+    Column("DL_ESCOMPTE", String, quote=True),
+    Column("DL_FACTPOIDS", String, quote=True),
+    Column("DL_FRAIS", String, quote=True),
+    Column("DL_LIGNE", String, quote=True),
+    Column("DL_MONTANTHT", Numeric(10, 2), quote=True),
+    Column("DL_MONTANTTTC", Numeric(10, 2), quote=True),
+    Column("DL_MVTSTOCK", String, quote=True),
+    Column("DL_NOCOLIS", String, quote=True),
+    Column("DL_NOLINK", String, quote=True),
+    Column("DL_NONLIVRE", String, quote=True),
+    Column("DL_NOREF", String, quote=True),
+    Column("DL_PIECEBC", String, quote=True),
+    Column("DL_PIECEBL", String, quote=True),
+    Column("DL_PIECEPL", String, quote=True),
+    Column("DL_POIDSBRUT", Numeric(10, 2), quote=True),
+    Column("DL_POIDSNET", Numeric(10, 2), quote=True),
+    Column("DL_PRIXRU", Numeric(10, 2), quote=True),
+    Column("DL_PRIXUNITAIRE", Numeric(10, 2), quote=True),
+    Column("DL_PUBC", String, quote=True),
+    Column("DL_PUDEVISE", Numeric(10, 2), quote=True),
+    Column("DL_PUTTC", Numeric(10, 2), quote=True),
+    Column("DL_QTE", Numeric(10, 2), quote=True),
+    Column("DL_QTEBC", Numeric(10, 2), quote=True),
+    Column("DL_QTEBL", Numeric(10, 2), quote=True),
+    Column("DL_QTEPL", Numeric(10, 2), quote=True),
+    Column("DL_QTERESSOURCE", Numeric(10, 2), quote=True),
+    Column("DL_REMISE01REM_TYPE", String, quote=True),
+    Column("DL_REMISE01REM_VALEUR", Numeric(10, 2), quote=True),
+    Column("DL_REMISE02REM_TYPE", String, quote=True),
+    Column("DL_REMISE02REM_VALEUR", Numeric(10, 2), quote=True),
+    Column("DL_REMISE03REM_TYPE", String, quote=True),
+    Column("DL_REMISE03REM_VALEUR", Numeric(10, 2), quote=True),
+    Column("DL_TAXE1", Numeric(10, 2), quote=True),
+    Column("DL_TAXE2", Numeric(10, 2), quote=True),
+    Column("DL_TAXE3", Numeric(10, 2), quote=True),
+    Column("DL_TNOMENCL", String, quote=True),
+    Column("DL_TREMEXEP", String, quote=True),
+    Column("DL_TREMPIED", String, quote=True),
+    Column("DL_TTC", Numeric(10, 2), quote=True),
+    Column("DL_TYPEPL", String, quote=True),
+    Column("DL_TYPETAUX1", String, quote=True),
+    Column("DL_TYPETAUX2", String, quote=True),
+    Column("DL_TYPETAUX3", String, quote=True),
+    Column("DL_TYPETAXE1", String, quote=True),
+    Column("DL_TYPETAXE2", String, quote=True),
+    Column("DL_TYPETAXE3", String, quote=True),
+    Column("DL_VALORISE", String, quote=True),
+
+    Column("DO_DATE", Date, quote=True),
+    Column("DO_DATELIVR", Date, quote=True),
+    Column("DO_DOMAINE", String, quote=True),
+    Column("DO_PIECE", String, quote=True),
+    Column("DO_REF", String, quote=True),
+    Column("DO_TYPE", String, quote=True),
+
+    Column("DT_NO", String, quote=True),
+    Column("EU_ENUMERE", String, quote=True),
+    Column("EU_QTE", Numeric(10, 2), quote=True),
+
+    Column("FNT_MONTANTHT", Numeric(10, 2), quote=True),
+    Column("FNT_MONTANTHTSIGNE", Numeric(10, 2), quote=True),
+    Column("FNT_MONTANTTAXES", Numeric(10, 2), quote=True),
+    Column("FNT_MONTANTTTC", Numeric(10, 2), quote=True),
+    Column("FNT_MONTANTTTCSIGNE", Numeric(10, 2), quote=True),
+    Column("FNT_PRIXUNET", Numeric(10, 2), quote=True),
+    Column("FNT_PRIXUNETDEVISE", Numeric(10, 2), quote=True),
+    Column("FNT_PRIXUNETTTC", Numeric(10, 2), quote=True),
+    Column("FNT_QTESIGNE", Numeric(10, 2), quote=True),
+    Column("FNT_REMISEGLOBALE", Numeric(10, 2), quote=True),
+
+    Column("LS_COMPLEMENT", String, quote=True),
+    Column("LS_FABRICATION", String, quote=True),
+    Column("LS_NOSERIE", String, quote=True),
+    Column("LS_PEREMPTION", String, quote=True),
+
+    Column("N°_DE_LOT/_CURE_DATE", String, quote=True),
+    Column("QTE_ACCESS", Numeric(10, 2), quote=True),
+    Column("RP_CODE", String, quote=True)
 )
 
 # --------------------------------------------------------------------
-# Importation des chemins absolus depuis outils.chemins
+# Création des tables Achats
 # --------------------------------------------------------------------
-from outils.chemins import racine_projet, dossier_config, dossier_xlsx_propres
-
-# --------------------------------------------------------------------
-# Fonctions utilitaires locales
-# --------------------------------------------------------------------
-def detect_driver():
-    """
-    Détecte quel driver SQL est installé (psycopg2 ou pymysql)
-    et retourne la chaîne driver SQLAlchemy sans port.
-    """
-    if importlib.util.find_spec("psycopg2"):
-        return "postgresql+psycopg2"
-    elif importlib.util.find_spec("pymysql"):
-        return "mysql+pymysql"
-    else:
-        raise ImportError("Aucun driver compatible détecté (psycopg2 ou pymysql).")
-
-def filtrer_colonnes(df: pd.DataFrame, table_sqlalchemy: Table) -> pd.DataFrame:
-    """
-    Garde uniquement les colonnes du DataFrame qui figurent dans la définition SQLAlchemy.
-    """
-    colonnes_sql = [col.name for col in table_sqlalchemy.columns]
-    return df.loc[:, df.columns.intersection(colonnes_sql)]
-
-def nettoyer_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Nettoie un DataFrame en :
-    - supprimant les colonnes entièrement vides
-    - remplaçant 'nan' par None
-    - convertissant les colonnes contenant 'DATE' en type date
-    - remplaçant NaN par None
-    """
-    df = df.dropna(axis=1, how="all")
-    for col in df.columns:
-        if df[col].dtype == object:
-            df[col] = df[col].replace('nan', None)
-    for col in df.columns:
-        if "DATE" in col.upper():
-            df[col] = pd.to_datetime(df[col], errors="coerce").dt.date
-    return df.where(pd.notna(df), None)
-
-def nettoyer_texte_objet(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Nettoie les colonnes de type objet (texte) pour éviter les problèmes d'encodage :
-    - Normalise les accents et caractères spéciaux.
-    - Remplace 'nan' par None.
-    """
-    for col in df.select_dtypes(include=["object"]).columns:
-        df[col] = (
-            df[col].astype(str)
-                  .replace('nan', None)
-                  .apply(lambda x: unicodedata.normalize('NFKC', x)
-                         .encode('utf-8', errors='replace')
-                         .decode('utf-8', errors='replace') if x else None)
-        )
-    return df
-
-# --------------------------------------------------------------------
-# Lecture de l’argument --db-type (PostgreSQL ou MySQL)
-# --------------------------------------------------------------------
-parser = argparse.ArgumentParser(description="Construction de la BDD (PostgreSQL/MySQL)")
-parser.add_argument(
-    "--db-type",
-    choices=["postgresql", "mysql"],
-    required=True,
-    help="Type de base de données : 'postgresql' ou 'mysql'"
-)
-args = parser.parse_args()
-db_type = args.db_type
-
-# --------------------------------------------------------------------
-# Détermination du chemin vers le fichier de configuration JSON
-# --------------------------------------------------------------------
-if db_type == "postgresql":
-    chemin_config = dossier_config / "postgres_config.json"
-else:
-    chemin_config = dossier_config / "mysql_config.json"
-
-if not chemin_config.exists():
-    raise FileNotFoundError(f"Le fichier de configuration {chemin_config} est introuvable.")
-
-# --------------------------------------------------------------------
-# Chargement du JSON de configuration
-# --------------------------------------------------------------------
-with open(chemin_config, "r", encoding="utf-8") as f:
-    config = json.load(f)
-
-# --------------------------------------------------------------------
-# Validation de la présence du port dans la configuration
-# --------------------------------------------------------------------
-port_config = config.get("db_port")
-if not port_config or str(port_config).strip() in {"", "0", "null"}:
-    raise KeyError(f"Le port n'est pas défini correctement dans {chemin_config}.")
-
-# --------------------------------------------------------------------
-# Détection du driver SQL sans supposer le port
-# --------------------------------------------------------------------
-driver = detect_driver()
-
-# --------------------------------------------------------------------
-# Construction de l’URL de connexion SQLAlchemy
-# --------------------------------------------------------------------
-url_connexion = (
-    f"{driver}://{config['db_user']}:{config['db_password']}"
-    f"@{config['db_host']}:{config['db_port']}/{config['db_name']}"
+# Table : FAMILLE (Achats)
+famille_achats = Table(
+    "FAMILLE", metadata_achats,
+    Column("FA_CODEFAMILLE", String, primary_key=True, quote=True),
+    Column("FA_CENTRAL", String, quote=True),
+    Column("FA_INTITULE", String, nullable=False, quote=True)
 )
 
-# Création du moteur SQLAlchemy
-moteur = create_engine(url_connexion)
+# Table : ARTICLES (Achats)
+articles_achats = Table(
+    "ARTICLES", metadata_achats,
+    Column("AR_REF", String, primary_key=True, quote=True),
+    Column("AR_DESIGN", String, quote=True),
+    Column("AR_PRIXACH", Numeric(10, 2), quote=True),
+    Column("FA_CODEFAMILLE", String, ForeignKey("Achats.FAMILLE.FA_CODEFAMILLE"), quote=True)
+)
 
-# --------------------------------------------------------------------
-# Création (ou recréation) des schémas « Achats » et « Ventes »
-# --------------------------------------------------------------------
-utilisateur = config["db_user"]
-with moteur.begin() as conn:
-    conn.execute(text('DROP SCHEMA IF EXISTS "Ventes" CASCADE;'))
-    conn.execute(text('DROP SCHEMA IF EXISTS "Achats" CASCADE;'))
-    conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "Achats" AUTHORIZATION "{utilisateur}";'))
-    conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "Ventes" AUTHORIZATION "{utilisateur}";'))
+# Table : COMPTET (Achats)
+comptet_achats = Table(
+    "COMPTET", metadata_achats,
+    Column("CT_NUM", String, primary_key=True, quote=True),
+    Column("CT_INTITULE", String, quote=True),
+    Column("BT_NUM", String, quote=True),
+    Column("CA_NUM", String, quote=True),
+    Column("CA_NUMIFRS", String, quote=True),
+    Column("CBCREATEUR", String, quote=True),
+    Column("CBMODIFICATION", String, quote=True),
+    Column("CBREPLICATION", String, quote=True),
+    Column("CG_NUMPRINC", String, quote=True),
+    Column("CODE_HYPERIX_CHEZ_LE_CLIENT", String, quote=True),
+    Column("CO_NO", String, quote=True),
+    Column("CT_ADRESSE", String, quote=True),
+    Column("CT_APE", String, quote=True),
+    Column("CT_ASSURANCE", String, quote=True),
+    Column("CT_BLFACT", String, quote=True),
+    Column("CT_CLASSEMENT", String, quote=True),
+    Column("CT_CODEPOSTAL", String, quote=True),
+    Column("CT_CODEREGION", String, quote=True),
+    Column("CT_COFACE", String, quote=True),
+    Column("CT_COMMENTAIRE", String, quote=True),
+    Column("CT_COMPLEMENT", String, quote=True),
+    Column("CT_CONTACT", String, quote=True),
+    Column("CT_CONTROLENC", String, quote=True),
+    Column("CT_DATECREATE", String, quote=True),
+    Column("CT_DATEFERMEDEBUT", String, quote=True),
+    Column("CT_DATEFERMEFIN", String, quote=True),
+    Column("CT_EDI1", String, quote=True),
+    Column("CT_EDI2", String, quote=True),
+    Column("CT_EDI3", String, quote=True),
+    Column("CT_EMAIL", String, quote=True),
+    Column("CT_ENCOURS", String, quote=True),
+    Column("CT_FACTURE", String, quote=True),
+    Column("CT_FACTUREELEC", String, quote=True),
+    Column("CT_IDENTIFIANT", String, quote=True),
+    Column("CT_LANGUE", String, quote=True),
+    Column("CT_LETTRAGE", String, quote=True),
+    Column("CT_LIVRPARTIELLE", String, quote=True),
+    Column("CT_NOTPENAL", String, quote=True),
+    Column("CT_NOTRAPPEL", String, quote=True),
+    Column("CT_NUMCENTRALE", String, quote=True),
+    Column("CT_NUMPAYEUR", String, quote=True),
+    Column("CT_PAYS", String, quote=True),
+    Column("CT_PRIORITELIVR", String, quote=True),
+    Column("CT_QUALITE", String, quote=True),
+    Column("CT_RACCOURCI", String, quote=True),
+    Column("CT_REPRESENTINT", String, quote=True),
+    Column("CT_REPRESENTNIF", String, quote=True),
+    Column("CT_SAUT", String, quote=True),
+    Column("CT_SIRET", String, quote=True),
+    Column("CT_SITE", String, quote=True),
+    Column("CT_SOMMEIL", String, quote=True),
+    Column("CT_STATISTIQUE01", String, quote=True),
+    Column("CT_STATISTIQUE02", String, quote=True),
+    Column("CT_STATISTIQUE03", String, quote=True),
+    Column("CT_STATISTIQUE04", String, quote=True),
+    Column("CT_STATISTIQUE05", String, quote=True),
+    Column("CT_STATISTIQUE06", String, quote=True),
+    Column("CT_STATISTIQUE07", String, quote=True),
+    Column("CT_STATISTIQUE08", String, quote=True),
+    Column("CT_STATISTIQUE09", String, quote=True),
+    Column("CT_STATISTIQUE10", String, quote=True),
+    Column("CT_SURVEILLANCE", String, quote=True),
+    Column("CT_SVCA", String, quote=True),
+    Column("CT_SVCOTATION", String, quote=True),
+    Column("CT_SVDATEBILAN", String, quote=True),
+    Column("CT_SVDATECREATE", String, quote=True),
+    Column("CT_SVDATEINCID", String, quote=True),
+    Column("CT_SVDATEMAJ", String, quote=True),
+    Column("CT_SVEFFECTIF", String, quote=True),
+    Column("CT_SVFORMEJURI", String, quote=True),
+    Column("CT_SVINCIDENT", String, quote=True),
+    Column("CT_SVNBMOISBILAN", String, quote=True),
+    Column("CT_SVOBJETMAJ", String, quote=True),
+    Column("CT_SVPRIVIL", String, quote=True),
+    Column("CT_SVREGUL", String, quote=True),
+    Column("CT_SVRESULTAT", String, quote=True),
+    Column("CT_TAUX01", String, quote=True),
+    Column("CT_TAUX02", String, quote=True),
+    Column("CT_TAUX03", String, quote=True),
+    Column("CT_TAUX04", String, quote=True),
+    Column("CT_TELECOPIE", String, quote=True),
+    Column("CT_TELEPHONE", String, quote=True),
+    Column("CT_TYPE", String, quote=True),
+    Column("CT_TYPENIF", String, quote=True),
+    Column("CT_VALIDECH", String, quote=True),
+    Column("CT_VILLE", String, quote=True),
+    Column("DE_NO", String, quote=True),
+    Column("EB_NO", String, quote=True),
+    Column("INT_ANALYTIQUE", String, quote=True),
+    Column("INT_CATCOMPTA", String, quote=True),
+    Column("INT_CATTARIF", String, quote=True),
+    Column("INT_CONDITION", String, quote=True),
+    Column("INT_DEVISE", String, quote=True),
+    Column("INT_EXPEDITION", String, quote=True),
+    Column("INT_PERIOD", String, quote=True),
+    Column("INT_RISQUE", String, quote=True),
+    Column("MR_NO", String, quote=True),
+    Column("N_ANALYTIQUE", String, quote=True),
+    Column("N_ANALYTIQUEIFRS", String, quote=True),
+    Column("N_CATCOMPTA", String, quote=True),
+    Column("N_CATTARIF", String, quote=True),
+    Column("N_CONDITION", String, quote=True),
+    Column("N_DEVISE", String, quote=True),
+    Column("N_EXPEDITION", String, quote=True),
+    Column("N_PERIOD", String, quote=True),
+    Column("N_RISQUE", String, quote=True)
+)
 
-# Test de la connexion
-try:
-    with moteur.connect() as connexion:
-        print("Connexion réussie à la base de données.")
-except Exception as erreur:
-    print("Échec de la connexion :", erreur)
-    exit(1)
+# Table : ARTFOURNISS (Achats)
+fournisseur_achats = Table(
+    "ARTFOURNISS", metadata_achats,
+    Column("AF_REFFOURNISS", String, primary_key=True, quote=True),
+    Column("AF_CODEBARRE", String, quote=True),
+    Column("AF_COLISAGE", String, quote=True),
+    Column("AF_CONVDIV", String, quote=True),
+    Column("AF_CONVERSION", String, quote=True),
+    Column("AF_DATEAPPLICATION", Date, quote=True),
+    Column("AF_DELAIAPPRO", Integer, quote=True),
+    Column("AF_DEVISE", String, quote=True),
+    Column("AF_GARANTIE", String, quote=True),
+    Column("AF_PRINCIPAL", String, quote=True),
+    Column("AF_PRIXACH", Numeric(10, 2), quote=True),
+    Column("AF_PRIXACHNOUV", Numeric(10, 2), quote=True),
+    Column("AF_PRIXDEV", Numeric(10, 2), quote=True),
+    Column("AF_PRIXDEVNOUV", Numeric(10, 2), quote=True),
+    Column("AF_QTEMINI", Numeric(10, 2), quote=True),
+    Column("AF_QTEMONT", Numeric(10, 2), quote=True),
+    Column("AF_REMISE", Numeric(10, 2), quote=True),
+    Column("AF_REMISENOUV", Numeric(10, 2), quote=True),
+    Column("AF_TYPEREM", String, quote=True),
+    Column("AF_UNITE", String, quote=True),
+    Column("AR_REF", String, ForeignKey("Achats.ARTICLES.AR_REF"), quote=True),
+    Column("CT_NUM", String, quote=True),
+    Column("EG_CHAMP", String, quote=True),
+    Column("INT_CHAMP", String, quote=True),
+    Column("INT_DEVISE", String, quote=True),
+    Column("INT_UNITE", String, quote=True),
+    Column("CBCREATEUR", String, quote=True),
+    Column("CBMODIFICATION", String, quote=True),
+    Column("CBREPLICATION", String, quote=True)
+)
 
-# --------------------------------------------------------------------
-# Création des tables physiques en base si nécessaire
-# --------------------------------------------------------------------
-metadata_achats.create_all(moteur, checkfirst=True)
-metadata_ventes.create_all(moteur, checkfirst=True)
+# Table : DOCLIGNE (Achats)
+docligne_achats = Table(
+    "DOCLIGNE", metadata_achats,
+    Column("DL_NO", String, primary_key=True, quote=True),
+    Column("AC_REFCLIENT", String, quote=True),
+    Column("AF_REFFOURNISS", String, ForeignKey("Achats.ARTFOURNISS.AF_REFFOURNISS"), quote=True),
+    Column("AG_NO1", String, quote=True),
+    Column("AG_NO2", String, quote=True),
+    Column("AR_REF", String, ForeignKey("Achats.ARTICLES.AR_REF"), quote=True),
+    Column("AR_REFCOMPOSE", String, quote=True),
+    Column("CA_NUM", String, quote=True),
+    Column("CO_NO", String, quote=True),
+    Column("CT_NUM", String, ForeignKey("Achats.COMPTET.CT_NUM"), quote=True),
+    Column("DE_NO", String, quote=True),
+    Column("DLC", String, quote=True),
+    Column("DLD", String, quote=True),
+    Column("DL_CMUP", Numeric(10, 2), quote=True),
+    Column("DL_DATEAVANCEMENT", String, quote=True),
+    Column("DL_DATEBC", Date, quote=True),
+    Column("DL_DATEBL", Date, quote=True),
+    Column("DL_DATEPL", String, quote=True),
+    Column("DL_DESIGN", String, quote=True),
+    Column("DL_ESCOMPTE", String, quote=True),
+    Column("DL_FACTPOIDS", String, quote=True),
+    Column("DL_FRAIS", String, quote=True),
+    Column("DL_LIGNE", String, quote=True),
+    Column("DL_MONTANTHT", Numeric(10, 2), quote=True),
+    Column("DL_MONTANTTTC", Numeric(10, 2), quote=True),
+    Column("DL_MVTSTOCK", String, quote=True),
+    Column("DL_NOCOLIS", String, quote=True),
+    Column("DL_NOLINK", String, quote=True),
+    Column("DL_NONLIVRE", String, quote=True),
+    Column("DL_NOREF", String, quote=True),
+    Column("DL_PIECEBC", String, quote=True),
+    Column("DL_PIECEBL", String, quote=True),
+    Column("DL_PIECEPL", String, quote=True),
+    Column("DL_POIDSBRUT", Numeric(10, 2), quote=True),
+    Column("DL_POIDSNET", Numeric(10, 2), quote=True),
+    Column("DL_PRIXRU", Numeric(10, 2), quote=True),
+    Column("DL_PRIXUNITAIRE", Numeric(10, 2), quote=True),
+    Column("DL_PUBC", String, quote=True),
+    Column("DL_PUDEVISE", Numeric(10, 2), quote=True),
+    Column("DL_PUTTC", Numeric(10, 2), quote=True),
+    Column("DL_QTE", Numeric(10, 2), quote=True),
+    Column("DL_QTEBC", Numeric(10, 2), quote=True),
+    Column("DL_QTEBL", Numeric(10, 2), quote=True),
+    Column("DL_QTEPL", Numeric(10, 2), quote=True),
+    Column("DL_QTERESSOURCE", Numeric(10, 2), quote=True),
+    Column("DL_REMISE01REM_TYPE", String, quote=True),
+    Column("DL_REMISE01REM_VALEUR", Numeric(10, 2), quote=True),
+    Column("DL_REMISE02REM_TYPE", String, quote=True),
+    Column("DL_REMISE02REM_VALEUR", Numeric(10, 2), quote=True),
+    Column("DL_REMISE03REM_TYPE", String, quote=True),
+    Column("DL_REMISE03REM_VALEUR", Numeric(10, 2), quote=True),
+    Column("DL_TAXE1", Numeric(10, 2), quote=True),
+    Column("DL_TAXE2", Numeric(10, 2), quote=True),
+    Column("DL_TAXE3", Numeric(10, 2), quote=True),
+    Column("DL_TNOMENCL", String, quote=True),
+    Column("DL_TREMEXEP", String, quote=True),
+    Column("DL_TREMPIED", String, quote=True),
+    Column("DL_TTC", Numeric(10, 2), quote=True),
+    Column("DL_TYPEPL", String, quote=True),
+    Column("DL_TYPETAUX1", String, quote=True),
+    Column("DL_TYPETAUX2", String, quote=True),
+    Column("DL_TYPETAUX3", String, quote=True),
+    Column("DL_TYPETAXE1", String, quote=True),
+    Column("DL_TYPETAXE2", String, quote=True),
+    Column("DL_TYPETAXE3", String, quote=True),
+    Column("DL_VALORISE", String, quote=True),
 
-# --------------------------------------------------------------------
-# Définition du dossier contenant les fichiers Excel nettoyés
-# --------------------------------------------------------------------
-chemin_dossier_xlsx = dossier_xlsx_propres
+    Column("DO_DATE", Date, quote=True),
+    Column("DO_DATELIVR", Date, quote=True),
+    Column("DO_DOMAINE", String, quote=True),
+    Column("DO_PIECE", String, quote=True),
+    Column("DO_REF", String, quote=True),
+    Column("DO_TYPE", String, quote=True),
 
-# --------------------------------------------------------------------
-# Fichiers Excel à charger pour le schéma Ventes
-# --------------------------------------------------------------------
-fichiers_ventes = {
-    "famille_ventes":  "F_FAMILLE_propre.xlsx",
-    "articles_ventes": "F_ARTICLE_propre.xlsx",
-    "comptet_ventes":  "F_COMPTET_propre.xlsx",
-    "docligne_ventes": "F_DOCLIGNE_propre.xlsx"
-}
+    Column("DT_NO", String, quote=True),
+    Column("EU_ENUMERE", String, quote=True),
+    Column("EU_QTE", Numeric(10, 2), quote=True),
 
-# --------------------------------------------------------------------
-# Fichiers Excel à charger pour le schéma Achats
-# --------------------------------------------------------------------
-fichiers_achats = {
-    "famille_achats":     "F_FAMILLE_propre.xlsx",
-    "articles_achats":    "F_ARTICLE_propre.xlsx",
-    "comptet_achats":     "F_COMPTET_propre.xlsx",
-    "fournisseur_achats": "F_ARTFOURNISS_propre.xlsx",
-    "docligne_achats":    "F_DOCLIGNE_propre.xlsx"
-}
+    Column("FNT_MONTANTHT", Numeric(10, 2), quote=True),
+    Column("FNT_MONTANTHTSIGNE", Numeric(10, 2), quote=True),
+    Column("FNT_MONTANTTAXES", Numeric(10, 2), quote=True),
+    Column("FNT_MONTANTTTC", Numeric(10, 2), quote=True),
+    Column("FNT_MONTANTTTCSIGNE", Numeric(10, 2), quote=True),
+    Column("FNT_PRIXUNET", Numeric(10, 2), quote=True),
+    Column("FNT_PRIXUNETDEVISE", Numeric(10, 2), quote=True),
+    Column("FNT_PRIXUNETTTC", Numeric(10, 2), quote=True),
+    Column("FNT_QTESIGNE", Numeric(10, 2), quote=True),
+    Column("FNT_REMISEGLOBALE", Numeric(10, 2), quote=True),
 
-# --------------------------------------------------------------------
-# Chargement des DataFrames depuis les fichiers Excel « propres »
-# --------------------------------------------------------------------
-tables_ventes = {}
-tables_achats = {}
+    Column("LS_COMPLEMENT", String, quote=True),
+    Column("LS_FABRICATION", String, quote=True),
+    Column("LS_NOSERIE", String, quote=True),
+    Column("LS_PEREMPTION", String, quote=True),
 
-# Charger les fichiers Ventes
-for nom_table, nom_fichier in fichiers_ventes.items():
-    chemin_excel = chemin_dossier_xlsx / nom_fichier
-    if chemin_excel.exists():
-        df = pd.read_excel(chemin_excel)
-        # Nettoyage léger : suppression des espaces dans les colonnes texte
-        for col in df.select_dtypes(include=["object"]).columns:
-            df[col] = df[col].astype(str).str.strip()
-        tables_ventes[nom_table] = df
-    else:
-        print(f"Fichier introuvable (Ventes) : {chemin_excel}")
-
-# Charger les fichiers Achats
-for nom_table, nom_fichier in fichiers_achats.items():
-    chemin_excel = chemin_dossier_xlsx / nom_fichier
-    if chemin_excel.exists():
-        df = pd.read_excel(chemin_excel)
-        for col in df.select_dtypes(include=["object"]).columns:
-            df[col] = df[col].astype(str).str.strip()
-        tables_achats[nom_table] = df
-    else:
-        print(f"Fichier introuvable (Achats) : {chemin_excel}")
-
-# --------------------------------------------------------------------
-# Nettoyage des DataFrames Ventes
-# --------------------------------------------------------------------
-for nom_table, df in tables_ventes.items():
-    df_nettoye = nettoyer_dataframe(df)
-    tables_ventes[nom_table] = df_nettoye
-    print(f"Colonnes nettoyées pour {nom_table} (Ventes) : {df_nettoye.columns.tolist()}")
-
-# Nettoyage des DataFrames Achats
-for nom_table, df in tables_achats.items():
-    df_nettoye = nettoyer_dataframe(df)
-    tables_achats[nom_table] = df_nettoye
-    print(f"Colonnes nettoyées pour {nom_table} (Achats) : {df_nettoye.columns.tolist()}")
-
-# --------------------------------------------------------------------
-# Normalisation des clés AF_REFFOURNISS (schéma Achats)
-# --------------------------------------------------------------------
-if "fournisseur_achats" in tables_achats and "docligne_achats" in tables_achats:
-    fourn_vals = (
-        tables_achats["fournisseur_achats"]["AF_REFFOURNISS"]
-        .dropna()
-        .astype(str)
-        .str.strip()
-        .unique()
-    )
-    df_docligne = tables_achats["docligne_achats"]
-    mask = (
-        df_docligne["AF_REFFOURNISS"].notna()
-    ) & (
-        df_docligne["AF_REFFOURNISS"].astype(str).str.strip().isin(fourn_vals)
-    )
-    tables_achats["docligne_achats"] = df_docligne.loc[mask]
-    print(f"{len(tables_achats['docligne_achats'])} lignes de DOCLIGNE conservées après filtrage (Achats)")
-
-# --------------------------------------------------------------------
-# Ordre d’insertion et correspondances SQL
-# --------------------------------------------------------------------
-ordre_insertion_ventes = ["famille_ventes", "articles_ventes", "comptet_ventes", "docligne_ventes"]
-noms_sql_ventes = {
-    "famille_ventes":  "FAMILLE",
-    "articles_ventes": "ARTICLES",
-    "comptet_ventes":  "COMPTET",
-    "docligne_ventes": "DOCLIGNE"
-}
-
-ordre_insertion_achats = ["famille_achats", "articles_achats", "comptet_achats", "fournisseur_achats", "docligne_achats"]
-noms_sql_achats = {
-    "famille_achats":     "FAMILLE",
-    "articles_achats":    "ARTICLES",
-    "comptet_achats":     "COMPTET",
-    "fournisseur_achats": "ARTFOURNISS",
-    "docligne_achats":    "DOCLIGNE"
-}
-
-# --------------------------------------------------------------------
-# Insertion des données dans le schéma Ventes
-# --------------------------------------------------------------------
-for nom_logique in ordre_insertion_ventes:
-    nom_table_sql = noms_sql_ventes[nom_logique]
-    table_obj = {
-        "famille_ventes":  famille_ventes,
-        "articles_ventes": articles_ventes,
-        "comptet_ventes":  comptet_ventes,
-        "docligne_ventes": docligne_ventes
-    }[nom_logique]
-    df = tables_ventes.get(nom_logique, pd.DataFrame())
-
-    # 1) Filtrer selon le modèle SQLAlchemy
-    df_filtre = filtrer_colonnes(df, table_obj)
-
-    # 2) Remplacer les "." isolés par NA
-    df_filtre = df_filtre.replace({".": pd.NA})
-
-    # 3) Traitements spécifiques
-    if nom_logique == "comptet_ventes":
-        df_filtre = df_filtre.dropna(subset=["CT_NUM"])
-        df_filtre["CT_INTITULE"] = df_filtre["CT_INTITULE"].astype(str)
-        df_filtre["CT_INTITULE"] = nettoyer_texte_objet(df_filtre[["CT_INTITULE"]])["CT_INTITULE"]
-
-    elif nom_logique == "docligne_ventes":
-        df_filtre = df_filtre.dropna(subset=["DL_NO", "AR_REF"])
-        df_filtre["CT_NUM"] = (
-            df_filtre["CT_NUM"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-        )
-        df_filtre["DL_DESIGN"] = nettoyer_texte_objet(df_filtre[["DL_DESIGN"]])["DL_DESIGN"]
-        df_filtre["CT_NUM"]       = df_filtre["CT_NUM"].astype(str)
-        df_filtre["AC_REFCLIENT"] = df_filtre["AC_REFCLIENT"].astype(str)
-        df_filtre["AR_REF"]       = df_filtre["AR_REF"].astype(str)
-        df_filtre["DL_DESIGN"]    = df_filtre["DL_DESIGN"].astype(str)
-        df_filtre["DL_QTE"]           = pd.to_numeric(df_filtre["DL_QTE"],           errors="coerce")
-        df_filtre["DL_PRIXUNITAIRE"]  = pd.to_numeric(df_filtre["DL_PRIXUNITAIRE"],  errors="coerce")
-        df_filtre["DL_MONTANTHT"]     = pd.to_numeric(df_filtre["DL_MONTANTHT"],     errors="coerce")
-        ct_ok = set(tables_ventes["comptet_ventes"]["CT_NUM"].astype(str).str.strip())
-        df_filtre = df_filtre[df_filtre["CT_NUM"].isin(ct_ok)]
-
-    elif nom_logique == "articles_ventes":
-        df_filtre = df_filtre.dropna(subset=["AR_REF"])
-        df_filtre["AR_REF"] = df_filtre["AR_REF"].astype(str)
-
-    elif nom_logique == "famille_ventes":
-        df_filtre["FA_CENTRAL"]  = df_filtre["FA_CENTRAL"].astype(str)
-        df_filtre["FA_INTITULE"] = df_filtre["FA_INTITULE"].astype(str)
-
-    # 4) Copie pour éviter SettingWithCopyWarning
-    df_filtre = df_filtre.copy()
-
-    # Nettoyage final : transformer 'None', 'nan', 'NaN' en None
-    for col in df_filtre.columns:
-        df_filtre[col] = df_filtre[col].apply(
-            lambda x: None if pd.isna(x) or str(x).strip() in ['None', 'nan', 'NaN'] else x
-        )
-
-    # 5) Insertion en base
-    try:
-        df_filtre.to_sql(
-            nom_table_sql,
-            moteur,
-            schema="Ventes",
-            if_exists="append",
-            index=False
-        )
-        print(f"Inséré dans Ventes.{nom_table_sql} : {len(df_filtre)} lignes.")
-    except SQLAlchemyError as err:
-        print(f"Erreur insertion Ventes.{nom_table_sql} : {err}")
-
-print("Chargement des données Ventes terminé.")
-
-# --------------------------------------------------------------------
-# Insertion des données dans le schéma Achats
-# --------------------------------------------------------------------
-for nom_logique in ordre_insertion_achats:
-    nom_table_sql = noms_sql_achats[nom_logique]
-    table_obj = {
-        "famille_achats":     famille_achats,
-        "articles_achats":    articles_achats,
-        "comptet_achats":     comptet_achats,
-        "fournisseur_achats": fournisseur_achats,
-        "docligne_achats":    docligne_achats
-    }[nom_logique]
-    df = tables_achats.get(nom_logique, pd.DataFrame())
-
-    df_filtre = filtrer_colonnes(df, table_obj)
-    df_filtre = df_filtre.replace({".": pd.NA})
-
-    if nom_logique == "comptet_achats":
-        df_filtre = df_filtre.dropna(subset=["CT_NUM"])
-        df_filtre["CT_NUM"]      = df_filtre["CT_NUM"].astype(str)
-        df_filtre["CT_INTITULE"] = df_filtre["CT_INTITULE"].astype(str)
-        df_filtre["CT_INTITULE"] = nettoyer_texte_objet(df_filtre[["CT_INTITULE"]])["CT_INTITULE"]
-
-    elif nom_logique == "docligne_achats":
-        df_filtre = df_filtre.dropna(subset=["DL_NO", "AF_REFFOURNISS", "AR_REF"])
-        df_filtre["CT_NUM"] = (
-            df_filtre["CT_NUM"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-        )
-        df_filtre["DL_DESIGN"] = nettoyer_texte_objet(df_filtre[["DL_DESIGN"]])["DL_DESIGN"]
-        df_filtre["CT_NUM"]       = df_filtre["CT_NUM"].astype(str)
-        df_filtre["AC_REFCLIENT"] = df_filtre["AC_REFCLIENT"].astype(str)
-        df_filtre["AR_REF"]       = df_filtre["AR_REF"].astype(str)
-        df_filtre["DL_DESIGN"]    = df_filtre["DL_DESIGN"].astype(str)
-        df_filtre["DL_QTE"]           = pd.to_numeric(df_filtre["DL_QTE"],           errors="coerce")
-        df_filtre["DL_PRIXUNITAIRE"]  = pd.to_numeric(df_filtre["DL_PRIXUNITAIRE"],  errors="coerce")
-        df_filtre["DL_MONTANTHT"]     = pd.to_numeric(df_filtre["DL_MONTANTHT"],     errors="coerce")
-        df_filtre = df_filtre[df_filtre["AF_REFFOURNISS"].astype(str).str.strip().isin(
-            tables_achats["fournisseur_achats"]["AF_REFFOURNISS"].dropna().astype(str).str.strip()
-        )]
-
-    elif nom_logique == "fournisseur_achats":
-        df_filtre = df_filtre.dropna(subset=["AF_REFFOURNISS"])
-        df_filtre = df_filtre.drop_duplicates(subset=["AF_REFFOURNISS"])
-        df_filtre["AF_REFFOURNISS"] = df_filtre["AF_REFFOURNISS"].astype(str)
-
-    elif nom_logique == "articles_achats":
-        df_filtre = df_filtre.dropna(subset=["AR_REF"])
-        df_filtre["AR_REF"] = df_filtre["AR_REF"].astype(str)
-
-    elif nom_logique == "famille_achats":
-        df_filtre["FA_CENTRAL"]  = df_filtre["FA_CENTRAL"].astype(str)
-        df_filtre["FA_INTITULE"] = df_filtre["FA_INTITULE"].astype(str)
-
-    df_filtre = df_filtre.copy()
-    for col in df_filtre.columns:
-        df_filtre[col] = df_filtre[col].apply(
-            lambda x: None if pd.isna(x) or str(x).strip() in ['None', 'nan', 'NaN'] else x
-        )
-
-    try:
-        df_filtre.to_sql(
-            nom_table_sql,
-            moteur,
-            schema="Achats",
-            if_exists="append",
-            index=False
-        )
-        print(f"Inséré dans Achats.{nom_table_sql} : {len(df_filtre)} lignes.")
-    except SQLAlchemyError as err:
-        print(f"Erreur insertion Achats.{nom_table_sql} : {err}")
-
-print("Chargement des données Achats terminé.")
-
-# --------------------------------------------------------------------
-# Fermeture propre du moteur SQLAlchemy
-# --------------------------------------------------------------------
-moteur.dispose()
-print("Connexion fermée proprement.")
+    Column("N°_DE_LOT/_CURE_DATE", String, quote=True),
+    Column("QTE_ACCESS", Numeric(10, 2), quote=True),
+    Column("RP_CODE", String, quote=True)
+)

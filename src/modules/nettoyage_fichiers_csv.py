@@ -9,7 +9,7 @@ import os
 # --------------------------------------------------------------------
 # Importation des chemins absolus depuis chemins.py
 # --------------------------------------------------------------------
-from outils.chemins import dossier_csv_extraits, dossier_xlsx_propres
+from src.outils.chemins import dossier_csv_extraits, dossier_xlsx_propres
 
 # --------------------------------------------------------------------
 # Vérification du dossier source et création du dossier de sortie
