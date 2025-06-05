@@ -1,9 +1,4 @@
-pyodbc
-pandas>=1.0,<3.0
-openpyxl
-matplotlib
-networkx
-pyvis
-python-dotenv
-sqlalchemy
-pymysql>=1.0
+# Requirements for MySQL import
+python-dotenv # for environment variables
+sqlalchemy # for database interaction
+pymysql>=1.0 # MySQL database adapter

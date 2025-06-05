@@ -1,9 +1,4 @@
-pyodbc
-pandas>=1.0,<3.0
-openpyxl
-matplotlib
-networkx
-pyvis
-python-dotenv
-sqlalchemy
-psycopg2-binary
+# requiremets for PostgreSQL import
+python-dotenv # for environment variables
+sqlalchemy # for database interaction
+psycopg2-binary # PostgreSQL database adapter

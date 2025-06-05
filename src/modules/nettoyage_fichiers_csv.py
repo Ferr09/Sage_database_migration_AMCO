@@ -3,8 +3,8 @@ import pandas as pd
 import re
 
 # === Dossiers ===
-dossier_source = r"extraits\csv_extraits"  # Dossier contenant les .csv        
-dossier_sortie = r"extraits\xlsx_propres"             # Dossier pour stocker les .xlsx
+dossier_source = r"extraits/csv_extraits"  # Dossier contenant les .csv        
+dossier_sortie = r"extraits/xlsx_propres"             # Dossier pour stocker les .xlsx
 
 # Vérification du dossier source
 if not os.path.isdir(dossier_source):

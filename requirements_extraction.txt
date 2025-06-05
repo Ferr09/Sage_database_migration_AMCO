@@ -1,0 +1,8 @@
+# Bibliothèques pour extraire et nettoyer les données depuis Access
+pandas>=1.3.5        # traitement des DataFrame et CSV
+pyodbc>=4.0.32       # connexion au driver Access
+openpyxl>=3.0.10     # pour lire/écrire fichier Excel si besoin
+xlsxwriter>=3.0.3    # pour exporter les DataFrame en .xlsx
+matplotlib >=3.5.1     # pour visualiser les données
+networkx >=2.6.3      # pour la visualisation de graphes
+pyvis >=0.1.9         # pour la visualisation interactive de graphes

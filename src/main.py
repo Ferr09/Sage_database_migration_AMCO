@@ -8,6 +8,10 @@ import subprocess
 import venv
 import json
 
+# --------------------------------------------------------------------
+# Fonctions utilitaires pour la gestion du venv et des requirements
+# --------------------------------------------------------------------
+
 def ensure_venv():
     venv_dir = '.venv'
     activate_script = os.path.join(venv_dir, 'Scripts', 'activate_this.py')
@@ -30,6 +34,52 @@ def ensure_venv():
             print("Attention : 'activate_this.py' est introuvable et requis pour Python < 3.8.")
             sys.exit("Arrêt du script pour éviter une exécution dans un environnement non activé.")
 
+def mise_a_jour_systeme():
+    subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
+
+def installer_requirements_extraction():
+    """
+    Installe uniquement les dépendances nécessaires à l'extraction depuis Access.
+    """
+    fichier_req = "requirements_extraction.txt"
+    if os.path.isfile(fichier_req):
+        print("Installation des dépendances pour l’extraction (requirements_extraction.txt)...")
+        result = subprocess.run([sys.executable, "-m", "pip", "install", "-r", fichier_req])
+        if result.returncode != 0:
+            print("Erreur : échec de l'installation des dépendances d'extraction.", file=sys.stderr)
+            sys.exit(result.returncode)
+    else:
+        print("Fichier requirements_extraction.txt introuvable. Impossible d’installer les dépendances d’extraction.", file=sys.stderr)
+        sys.exit(1)
+
+def installer_requirements_chargement(db_type: str):
+    """
+    Installe les dépendances nécessaires au chargement dans la base choisie :
+    - 'postgresql' -> requirements_postgres.txt
+    - 'mysql'      -> requirements_mysql.txt
+    """
+    if db_type == "postgresql":
+        fichier_req = "requirements_postgres.txt"
+    elif db_type == "mysql":
+        fichier_req = "requirements_mysql.txt"
+    else:
+        print(f"Type de base non géré : {db_type}", file=sys.stderr)
+        sys.exit(1)
+
+    if os.path.isfile(fichier_req):
+        print(f"Installation des dépendances pour le chargement ({fichier_req})...")
+        result = subprocess.run([sys.executable, "-m", "pip", "install", "-r", fichier_req])
+        if result.returncode != 0:
+            print("Erreur : échec de l'installation des dépendances de chargement.", file=sys.stderr)
+            sys.exit(result.returncode)
+    else:
+        print(f"Fichier {fichier_req} introuvable. Impossible d’installer les dépendances de chargement.", file=sys.stderr)
+        sys.exit(1)
+
+# --------------------------------------------------------------------
+# Fonctions existantes (légèrement adaptées)
+# --------------------------------------------------------------------
+
 def afficher_readme():
     readme_path = "README.md"
     if not os.path.exists(readme_path):
@@ -42,15 +92,6 @@ def afficher_readme():
         print("="*50)
         print(contenu)
         print("="*50 + "\n")
-
-def installer_requirements():
-    fichier_req = os.path.join(os.getcwd(), "requirements.txt")
-    if os.path.isfile(fichier_req):
-        print("Installation des dépendances depuis requirements.txt...")
-        result = subprocess.run([sys.executable, "-m", "pip", "install", "-r", fichier_req])
-        if result.returncode != 0:
-            print("Erreur : échec de l'installation des dépendances.", file=sys.stderr)
-            sys.exit(result.returncode)
 
 def verifier_driver_access():
     try:
@@ -75,52 +116,69 @@ def lancer_module(command):
     if result.returncode != 0:
         raise RuntimeError(f"Échec du module : {' '.join(command)}")
 
-def config_postgres():
-    cfg_path = os.path.join(os.getcwd(), 'config/postgres_config.json')
+def config_bdd():
+    """
+    Demande à l'utilisateur le type de base (postgresql ou mysql) et construit
+    le fichier de configuration JSON correspondant. Retourne (db_type, True/False).
+    """
+    cfg_dir = os.path.join(os.getcwd(), 'config')
+    os.makedirs(cfg_dir, exist_ok=True)
+
+    choix_type = input("Choisissez le type de base pour l’injection (postgresql/mysql) : ").strip().lower()
+    if choix_type not in ("postgresql", "mysql"):
+        print("Type invalide. Fin.")
+        return None, False
+
+    nom_fichier = "postgres_config.json" if choix_type == "postgresql" else "mysql_config.json"
+    cfg_path = os.path.join(cfg_dir, nom_fichier)
     if os.path.isfile(cfg_path):
-        overwrite = input("Un config.json existe déjà. Supprimer et recréer ? (oui/non) : ").strip().lower()
+        overwrite = input(f"Un {nom_fichier} existe déjà. Supprimer et recréer ? (oui/non) : ").strip().lower()
         if overwrite in ('oui', 'o'):
             os.remove(cfg_path)
-            print("Ancien config.json supprimé.")
+            print(f"Ancien {nom_fichier} supprimé.")
         else:
-            print("Utilisation du config.json existant.")
-            return True
+            print(f"Utilisation du {nom_fichier} existant.")
+            return choix_type, True
 
-    choix = input("Souhaitez-vous injecter les données dans PostgreSQL ? (oui/non) : ").strip().lower()
-    if choix not in ('oui', 'o'):
-        return False
-
+    print(f"--- Configuration pour {choix_type} ---")
     cfg = {
-        'db_host':     input("Hôte PostgreSQL (ex: localhost) : ").strip(),
-        'db_port':     input("Port (ex: 5432) : ").strip(),
-        'db_name':   input("Nom de la base : ").strip(),
+        'db_host':     input("Hôte (ex: localhost) : ").strip(),
+        'db_port':     input("Port (ex: 5432 ou 3306) : ").strip(),
+        'db_name':     input("Nom de la base : ").strip(),
         'db_user':     input("Utilisateur : ").strip(),
         'db_password': input("Mot de passe : ").strip()
     }
 
-    with open(cfg_path, 'w', encoding='utf-8') as f:
+    with open(cfg_path, 'w', encoding="utf-8") as f:
         json.dump(cfg, f, indent=4)
-    print("config.json créé.")
-    return True
+    print(f"{nom_fichier} créé.")
+    return choix_type, True
+
+# --------------------------------------------------------------------
+# Fonction principale
+# --------------------------------------------------------------------
 
 def main():
-    # 1. venv et dépendances
+    # 1. Création du venv et mise à jour pip/setuptools/wheel
     ensure_venv()
-    installer_requirements()
+    mise_a_jour_systeme()
 
-    # 2. Lecture optionnelle du README
+    # 2. Installation des dépendances d'extraction uniquement
+    installer_requirements_extraction()
+
+    # 3. Lecture optionnelle du README
     lire_readme = input("Voulez-vous consulter le README avant de continuer ? (oui/non) : ").strip().lower()
     if lire_readme in ('oui', 'o'):
         afficher_readme()
         input("Appuyez sur Entrée pour continuer...")
 
-    # 3. Choix de l'étape de départ
+    # 4. Choix de l'étape de départ
     print("Choisissez une option :")
-    print("1. Exporter la base Access vers fichiers intermédiaires")
-    print("2. Charger directement dans PostgreSQL (si fichiers déjà générés)")
+    print("1. Exporter la base Access vers fichiers intermédiaires (CSV/Excel)")
+    print("2. Charger directement dans une base (si fichiers déjà générés)")
     choix_etape = input("Votre choix (1/2) : ").strip()
 
-    # 4. Étape 1 : export Access
+    # === Étape 1 : export Access ===
     if choix_etape == '1':
         verifier_driver_access()
         parser = argparse.ArgumentParser(description="Pipeline Access - chemin facultatif")
@@ -129,14 +187,15 @@ def main():
         if args.access_file and verifier_fichier(args.access_file):
             path_access = args.access_file
         else:
-            # Dossier contenant les .accdb
             dossier_access = os.path.join(os.getcwd(), "db_sage_access")
-            # Chercher un fichier .accdb dans ce dossier
             if os.path.isdir(dossier_access):
                 fichiers = [f for f in os.listdir(dossier_access) if f.endswith(".accdb")]
                 if fichiers:
                     path_access = os.path.join(dossier_access, fichiers[0])
                     print(f"Fichier .accdb trouvé : {path_access}")
+                else:
+                    print("Aucun fichier .accdb trouvé dans db_sage_access.")
+                    sys.exit(1)
             else:
                 print("Aucune configuration trouvée. Tapez 'sortir' pour abandonner.")
                 while True:
@@ -152,19 +211,27 @@ def main():
         lancer_module([sys.executable, "src/modules/extraction_entetes.py"])
         lancer_module([sys.executable, "src/outils/generer_statistiques_tables.py"])
         lancer_module([sys.executable, "src/modules/nettoyage_fichiers_csv.py"])
+        print("\nExtraction terminée. Vous pouvez maintenant lancer l’étape 2 pour l’injection.")
 
-    # 5. Étape 2 : injection PostgreSQL
+    # === Étape 2 : injection vers une base (PostgreSQL ou MySQL) ===
     while True:
-        if not config_postgres():
-            print("Fin sans injection PostgreSQL.")
+        db_type, config_ok = config_bdd()
+        if not config_ok or db_type is None:
+            print("Fin sans injection en base.")
             break
+
+        # 2.1. Installer les dépendances de chargement en fonction du type choisi
+        installer_requirements_chargement(db_type)
+
+        # 2.2. Lancer le script de construction de la BDD
         try:
-            lancer_module([sys.executable, "src/modules/construction_bdd_sql.py"])
+            # On passe le type de base en argument pour choisir le driver dans construction_bdd_sql.py
+            lancer_module([sys.executable, "src/modules/construction_bdd_sql.py", "--db-type", db_type])
             print("Injection réussie.")
             break
         except RuntimeError as e:
             print(f"Erreur injection : {e}")
-            retry = input("Recréer le config.json et réessayer ? (oui/non) : ").strip().lower()
+            retry = input("Recréer le fichier de configuration et réessayer ? (oui/non) : ").strip().lower()
             if retry not in ('oui', 'o'):
                 print("Abandon injection.")
                 break
