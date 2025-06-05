@@ -135,7 +135,7 @@ def demander_chemin(prompt: str) -> str:
     """
     return input(f"{prompt}").strip()
 
-def config_bdd() -> (str, bool):
+def config_bdd() -> (str, bool): # type: ignore
     """
     Interroge l’utilisateur pour savoir s’il veut charger dans PostgreSQL ou MySQL,
     lit (ou crée) le fichier de configuration JSON adéquat.
