@@ -22,7 +22,7 @@ racine_projet = chemin_actuel.parents[2]
 # 3.1 Fichiers de configuration à la racine
 chemin_readme = racine_projet / "README.md"
 chemin_makefile = racine_projet / "Makefile"
-chemin_requirements = racine_projet / "requirements.txt"
+
 
 # 3.2 Dossier contenant les bases Access (.accdb)
 dossier_db_access = racine_projet / "db_sage_access"
@@ -32,6 +32,14 @@ dossier_extraits = racine_projet / "extraits"
 dossier_csv_extraits = dossier_extraits / "csv_extraits"
 dossier_xlsx_propres = dossier_extraits / "xlsx_propres"
 dossier_txt_entetes = dossier_extraits / "entetes_csv"
+
+# 3.3.1 Dossier contenant les fichiers des bibliothèques requises pour l'environnement virtuel python 
+dossier_requirements = racine_projet / "requirements"
+
+# 3.3.2 Fichier requirements.txt pour les dépendances Python pour l'extraction
+chemin_requirements_extraction = dossier_requirements / "requirements_extraction.txt"
+chemin_requirements_mysql = dossier_requirements / "requirements_mysql.txt"  # pour compatibilité MySQL
+chemin_requirements_postgresql = dossier_requirements / "requirements_postgresql.txt"  # pour compatibilité PostgreSQL
 
 # 3.4 Dossier « src/ » et ses sous-dossiers
 dossier_src = racine_projet / "src"

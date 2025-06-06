@@ -1,207 +1,284 @@
 import os
-import time
 from collections import defaultdict
 
-import matplotlib.cm as cm
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import networkx as nx
 
-# === Configuration des chemins ===
-base_dir = r"extraits"
-base_dir_stats = r"statistiques"
-dossier_entetes     = os.path.join(base_dir, "entetes_csv")
-dossier_statistiques = os.path.join(base_dir_stats, "tables")
-dossier_analyse     = os.path.join(base_dir_stats, "analyse_structure_db")
-os.makedirs(dossier_analyse, exist_ok=True)
+from src.outils.chemins import (
+    dossier_txt_entetes,
+    dossier_tables_statistiques
+)
 
-# === Lire la liste des tables à modéliser (≥10 lignes) ===
-fichier_plus10 = os.path.join(dossier_statistiques, "tables_plus_de_10_lignes.txt")
-with open(fichier_plus10, "r", encoding="utf-8") as f:
+# ==============================================================================
+# 1) CHARGER LA LISTE DES TABLES IMPORTANTES (≥100 LIGNES)
+# ==============================================================================
+fichier_plus100 = dossier_tables_statistiques / "tables_plus_de_100_lignes.txt"
+with open(fichier_plus100, "r", encoding="utf-8") as f:
     tables_importantes = {line.strip() for line in f if line.strip()}
 
-print(f"Tables à modéliser (≥10 lignes) : {sorted(tables_importantes)}\n")
-
-# === 1) Construire le graphe de relations d'entêtes ===
-def construction_graphe_relations_entetes(dossier, tables_cibles):
-    print(f"DEBUG: tables_importantes = {tables_cibles}")
-    tous_fichiers = [f for f in os.listdir(dossier) if f.endswith("_entetes.txt")]
-    print(f"DEBUG: fichiers entetes trouvés = {tous_fichiers}")
-
-    graphe = defaultdict(list)
+# ==============================================================================
+# 2) LIRE ET NORMALISER LES EN-TÊTES DE CHAQUE TABLE
+# ==============================================================================
+def charger_entetes(dossier, tables_cibles):
     colonnes_par_table = {}
+    for fichier in os.listdir(dossier):
+        if fichier.endswith("_entetes.txt"):
+            nom_table = fichier.replace("_entetes.txt", "")
+            if nom_table in tables_cibles:
+                chemin = dossier / fichier
+                with open(chemin, "r", encoding="utf-8") as ff:
+                    # strip + lower pour chaque en-tête
+                    colonnes = [l.strip().lower() for l in ff if l.strip()]
+                    colonnes_par_table[nom_table] = colonnes
+    return colonnes_par_table
 
-    for fichier in tous_fichiers:
-        nom_table = os.path.splitext(fichier)[0]  # e.g. "F_DOCENTETE_entetes"
-        # para extraer la tabla: quitar sufijo "_entetes"
-        nom_table_brut = nom_table.replace("_entetes","")
-        print(f"  -> candidat: {nom_table_brut}")
-        if nom_table_brut not in tables_cibles:
-            print(f"     ignoré (no en tables_cibles)")
-            continue
+colonnes_par_table = charger_entetes(dossier_txt_entetes, tables_importantes)
 
-        chemin = os.path.join(dossier, fichier)
-        with open(chemin, 'r', encoding='utf-8') as f:
-            colonnes = [l.strip().lower() for l in f if l.strip()]
-        colonnes_par_table[nom_table_brut] = colonnes
+# ==============================================================================
+# 3) CLASSIFICATION DES TABLES PAR FAMILLE (PRIORISATION DES TABLES)
+# ==============================================================================
+def classifier_famille(table, colonnes):
+    """
+    Retourne la famille de la table selon ses colonnes. Override possible pour
+    forcer positionnement élevé (priorité) sur certaines tables clés.
+    """
+    nom = table.upper()
+    # Override : forcer certaines tables dans des familles prioritaires
+    if nom == "F_DOCLIGNE":
+        return "commandes"
+    if nom == "F_DOCENTETE":
+        return "commandes"
+    if nom == "F_ARTFOURNISS":
+        return "achats"
+    if nom == "F_ARTCLIENT":
+        return "ventes"
 
-    print(f"DEBUG: colonnes_par_table keys = {list(colonnes_par_table.keys())}")
+    # Heuristique par mots-clés
+    familles = {
+        "articles":     ["ar_ref", "libelle", "designation", "prix", "gamme"],
+        "clients":      ["ct_num", "nom", "raison", "adresse"],
+        "commandes":    ["dl_no", "doc_no", "commande", "date", "quantite"],
+        "prix":         ["prix", "tarif", "remise"],
+        "chiffre":      ["montant", "ca", "tva"],
+        "quantite":     ["quantite", "stock", "unite"],
+        "fournisseurs": ["af_reffourniss", "codefourniss"],
+        "logistique":   ["lotserie", "lotfinfo", "lotfimo", "lotfdlc"],
+        "production":   ["fo_codeprod", "fo_dateprod"],
+        "stockage":     ["st_codestock", "st_emplacement"],
+        "livraison":    ["f_li_no", "f_li_date"],
+        "qualité":      ["qual_code", "qual_statut"]
+    }
+    scores = defaultdict(int)
+    for col in colonnes:
+        for famille, mots_cles in familles.items():
+            if any(mot in col for mot in mots_cles):
+                scores[famille] += 1
+    if scores:
+        return max(scores, key=scores.get)
+    return "autres"
 
-    # ahora construimos los arcos
-    for src, cols in colonnes_par_table.items():
-        for col in cols:
-            for tgt, tgt_cols in colonnes_par_table.items():
-                if tgt != src and col in tgt_cols and tgt not in graphe[src]:
-                    graphe[src].append(tgt)
+groupes_tables = {tbl: classifier_famille(tbl, cols) for tbl, cols in colonnes_par_table.items()}
 
-    return graphe
-
-# === 2) Enregistrer le graphe dans un txt ===
-def enregistrer_graphe_dans_fichier(graphe, nom_fichier):
-    chemin = os.path.join(dossier_analyse, nom_fichier)
-    with open(chemin, 'w', encoding='utf-8') as f:
-        for src in sorted(graphe):
-            f.write(f"Table : {src}\n{'-'*(8+len(src))}\n")
-            if graphe[src]:
-                for tgt in sorted(graphe[src]):
-                    f.write(f"{src} -> {tgt}\n")
-            else:
-                f.write("(aucun lien détecté)\n")
-            f.write("\n")
-    print(f"Graphe enregistré dans : {chemin}")
-
-# === 3) Trouver chemins groupés ===
-groupes_tables = {
-    "articles":     ["f_article","f_artclient","f_artfourniss","f_artgamme","f_artprix","f_artstock","f_artstockempl","f_artcompo"],
-    "clients":      ["p_tiers","f_famclient","f_artclient"],
-    "commandes":    ["f_docentete","f_docligne","f_docligneempl","f_docregl","f_piece","p_cmddetail"],
-    "prix":         ["f_artprix","f_tarif","f_tarifcond","f_tarifqte","f_tarifremise"],
-    "quantite":     ["f_docligne","f_artstock","f_artstockempl","f_artcompo"],
-    "chiffre":      ["f_docentete","f_docligne","f_caisse"],
+# Priorités numériques pour l’ordonnancement : plus petit = priorité haute
+priorité_familles = {
+    "commandes":  0,
+    "achats":     0,
+    "ventes":     0,
+    "articles":   1,
+    "clients":    1,
+    "prix":       2,
+    "chiffre":    2,
+    "quantite":   3,
+    "logistique": 4,
+    "production": 4,
+    "stockage":   4,
+    "livraison":  4,
+    "qualité":    4,
+    "autres":     5
 }
 
-def groupe_de_table(nom):
-    for g, tbls in groupes_tables.items():
-        if nom in tbls:
-            return g
-    return None
+# ==============================================================================
+# 4) DÉFINIR LA PRIORITÉ DES COLONNES (PRIORISATION DES COLONNES)
+# ==============================================================================
+colonnes_prios = ["ar_ref", "fa_codefamille", "ct_num", "dl_no", "af_reffourniss"]
+# On utilisera l’ordre dans cette liste pour ordonner les arêtes
 
-def enregistrer_chemins_groupes_valides(graphe, nombre_max=10, profondeur_max=30,
-                                         rep_limite=5, prefix_limite=2, min_groupes=4,
-                                         nom_fichier="chemins_groupes.txt"):
-    G = nx.DiGraph()
-    for src, tgts in graphe.items():
-        for tgt in tgts:
-            G.add_edge(src, tgt)
+# ==============================================================================
+# 5) CONSTRUCTION DU GRAPHE ET ÉTIQUETAGE DES ARÊTES
+#    Chaque arête porte l’attribut “colonne” = nom de la colonne qui relie les tables
+# ==============================================================================
+def construction_graphe(colonnes_par_table):
+    graphe = defaultdict(list)
+    labels_arcs = {}
+    connexions_faites = set()
 
+    # Phase 1 : connexions pour colonnes prioritaires
+    for src, cols in colonnes_par_table.items():
+        for col in colonnes_prios:
+            if col in cols:
+                for tgt, tgt_cols in colonnes_par_table.items():
+                    if tgt != src and col in tgt_cols and (src, tgt) not in connexions_faites:
+                        graphe[src].append(tgt)
+                        labels_arcs[(src, tgt)] = col
+                        connexions_faites.add((src, tgt))
+
+    # Phase 2 : connexions pour toutes les autres colonnes
+    for src, cols in colonnes_par_table.items():
+        for col in cols:
+            if col in colonnes_prios:
+                continue
+            for tgt, tgt_cols in colonnes_par_table.items():
+                if tgt != src and col in tgt_cols and (src, tgt) not in connexions_faites:
+                    graphe[src].append(tgt)
+                    labels_arcs[(src, tgt)] = col
+                    connexions_faites.add((src, tgt))
+
+    return graphe, labels_arcs
+
+graphe, labels_arcs = construction_graphe(colonnes_par_table)
+
+# ==============================================================================
+# 6) CHERCHER PLUSIEURS CHEMINS PAR DFS AVEC PRIORITÉS
+#    - Priorité sur les colonnes (visiter d’abord arêtes issues de colonnes prioritaires)
+#    - Priorité sur les tables (visiter d’abord voisins de familles prioritaires)
+#    - On limite à max_chemins et profondeur ≤ profondeur_max pour éviter explosion
+# ==============================================================================
+def chercher_chemins_priorises(graphe, labels_arcs, groupes_tables,
+                              max_chemins=5, profondeur_max=6):
     chemins = []
-    prefix_counter = defaultdict(int)
+    explorations = 0
 
-    def dfs(noeud, chemin, groupes_us, vus):
-        if len(chemins) >= nombre_max:
+    def dfs(noeud, chemin, vus):
+        nonlocal explorations
+        if explorations >= max_chemins:
             return
-        chemin.append(noeud)
-        grp = groupe_de_table(noeud)
-        if grp:
-            groupes_us.add(grp)
-        prefix = tuple(chemin[:prefix_limite])
-        if prefix_counter[prefix] >= rep_limite:
+        if len(chemin) - 1 > profondeur_max:
             return
-        if len(groupes_us) >= min_groupes:
-            prefix_counter[prefix] += 1
-            chemins.append((list(chemin[:profondeur_max]), set(groupes_us)))
-        if len(chemin) >= profondeur_max:
-            return
-        for v in G.successors(noeud):
-            if (noeud, v) not in vus:
-                dfs(v, chemin.copy(), groupes_us.copy(), vus | {(noeud, v)})
+        # On enregistre chaque chemin non trivial (au moins 2 nœuds)
+        if len(chemin) >= 2:
+            chemins.append(list(chemin))
+            explorations += 1
+            if explorations >= max_chemins:
+                return
+        # Préparer la liste des voisins triés par priorité (table puis colonne)
+        voisins = []
+        for tgt in graphe.get(noeud, []):
+            if tgt not in vus:
+                col = labels_arcs.get((noeud, tgt), "")
+                # index de la colonne dans colonnes_prios (plus petit = meilleure priorité, sinon très grand)
+                idx_col = colonnes_prios.index(col) if col in colonnes_prios else len(colonnes_prios)
+                # priorité de la famille de la table cible
+                prio_fam = priorité_familles.get(groupes_tables.get(tgt, "autres"), len(priorité_familles))
+                voisins.append((prio_fam, idx_col, tgt))
+        # Trier d’abord par prio_fam, puis par idx_col
+        voisins.sort(key=lambda x: (x[0], x[1]))
+        # Explorer dans cet ordre
+        for _, _, voisin in voisins:
+            chemin.append(voisin)
+            vus.add(voisin)
+            dfs(voisin, chemin, vus)
+            vus.remove(voisin)
+            chemin.pop()
+            if explorations >= max_chemins:
+                return
 
-    start = time.time()
-    for n in G.nodes():
-        if groupe_de_table(n):
-            dfs(n, [], set(), set())
-        if len(chemins) >= nombre_max:
+    # Lancer DFS depuis chaque table jusqu’à max_chemins
+    for source in graphe.keys():
+        if explorations >= max_chemins:
             break
-    duration = time.time() - start
+        dfs(source, [source], {source})
 
-    chemin = os.path.join(dossier_analyse, nom_fichier)
-    with open(chemin, "w", encoding="utf-8") as f:
-        f.write(f"Chemins valides (max {nombre_max}) – durée : {duration:.2f}s\n\n")
-        for i, (seq, grps) in enumerate(chemins, 1):
-            f.write(f"{i:02d}. {' → '.join(seq)}   [groupes : {', '.join(sorted(grps))}]\n")
-    print(f"Chemins enregistrés dans : {chemin}")
     return chemins
 
-# === 4) Visualiser ===
-def visualiser(graphe, chemins, groupes, titre="Relations entre tables importantes"):
-    import matplotlib.pyplot as plt
-    import matplotlib.cm as cm
-    import networkx as nx
-    from collections import defaultdict
+chemins = chercher_chemins_priorises(graphe, labels_arcs, groupes_tables,
+                                     max_chemins=5, profondeur_max=6)
 
-    # Construire le DiGraph
-    G = nx.DiGraph()
-    for src, tgts in graphe.items():
-        for tgt in tgts:
-            G.add_edge(src, tgt)
+print(">>> Chemins prioritaires trouvés :")
+for idx, chemin in enumerate(chemins, 1):
+    print(f"  {idx:02d}. {' → '.join(chemin)}")
 
-    # Préparer un mapping table -> groupe, en normalisant en minuscules
-    table_to_groupe = {}
-    for g, tbls in groupes.items():
-        for t in tbls:
-            table_to_groupe[t.lower()] = g
-    default_group = "autres"
+# ==============================================================================
+# 7) VISUALISATION : SOUS-GRAPHE RESTREINT + CHEMINS COLORÉS AVEC ÉTIQUETTES
+#    - On regroupe tous les nœuds des chemins et leurs voisins directs
+#    - Afficher en gris le sous-graphe, puis superposer chaque chemin en couleur
+# ==============================================================================
+def visualiser_chemins_final(graphe, labels_arcs, chemins):
+    if not chemins:
+        print(">>> Aucun chemin à afficher.")
+        return
 
-    # Rassembler les nœuds par groupe en comparant en lowercase
-    groupes_positions = defaultdict(list)
-    for n in G.nodes():
-        grp = table_to_groupe.get(n.lower(), default_group)
-        groupes_positions[grp].append(n)
+    # 7.1) Rassembler tous les nœuds qui apparaissent dans les chemins
+    noeuds_chemins = set()
+    for seq in chemins:
+        noeuds_chemins.update(seq)
 
-    # Déterminer les positions (colonnes par groupe, lignes par index)
-    pos = {}
-    x_gap, y_gap = 4, 1.5
-    for i, (grp, nodes) in enumerate(sorted(groupes_positions.items())):
-        for j, node in enumerate(sorted(nodes)):
-            pos[node] = (i * x_gap, -j * y_gap)
-        pos[f"label_{grp}"] = (i * x_gap, y_gap)
+    # 7.2) Ajouter les voisins directs pour conserver un contexte minimal
+    noeuds_contextes = set(noeuds_chemins)
+    for n in list(noeuds_chemins):
+        for voisin in graphe.get(n, []):
+            noeuds_contextes.add(voisin)
+        for src, tgt_list in graphe.items():
+            if n in tgt_list:
+                noeuds_contextes.add(src)
 
-    # Tracé
-    plt.figure(figsize=(16, 10))
-    nx.draw_networkx_nodes(G, pos, node_size=1800, node_color="lightblue")
-    nx.draw_networkx_labels(G, pos, font_size=10, font_weight="bold")
-    nx.draw_networkx_edges(G, pos, edgelist=G.edges(), width=1.0, edge_color="gray")
+    # 7.3) Construire le sous-graphe contenant uniquement ces nœuds et arêtes
+    G_sub = nx.DiGraph()
+    for src in noeuds_contextes:
+        for tgt in graphe.get(src, []):
+            if tgt in noeuds_contextes:
+                G_sub.add_edge(src, tgt, label=labels_arcs.get((src, tgt), ""))
 
+    # 7.4) Calculer un layout rapide pour ce sous-graphe
+    pos = nx.spring_layout(G_sub, k=0.5, iterations=30)
+
+    plt.figure(figsize=(14, 8))
+
+    # 7.5) Dessiner tous les nœuds + étiquettes de nœuds
+    nx.draw_networkx_nodes(G_sub, pos,
+                           node_size=1000,
+                           node_color="lightblue",
+                           edgecolors="black")
+    nx.draw_networkx_labels(G_sub, pos,
+                            font_size=9,
+                            font_weight="bold")
+
+    # 7.6) Dessiner toutes les arêtes du sous-graphe en gris (contexte global)
+    toutes_sub_arcs = list(G_sub.edges())
+    nx.draw_networkx_edges(G_sub, pos,
+                           edgelist=toutes_sub_arcs,
+                           width=1.0,
+                           edge_color="lightgray")
+
+    # 7.7) Superposer chaque chemin en couleur avec étiquettes de colonnes
     cmap = cm.get_cmap("tab10")
-    for idx, (seq, _) in enumerate(chemins):
-        edges = list(zip(seq, seq[1:]))
-        color = cmap(idx % cmap.N)
-        nx.draw_networkx_edges(
-            G, pos,
-            edgelist=edges,
-            width=4.0,
-            edge_color=[color] * len(edges),
-        )
+    for idx, seq in enumerate(chemins):
+        couleur = cmap(idx % cmap.N)
+        # Liste des arêtes (src, tgt) du chemin
+        edges_chemin = [(seq[i], seq[i+1]) for i in range(len(seq)-1)]
+        # Filtrer pour ne garder que celles présentes dans le sous-graphe
+        edges_chemin = [edge for edge in edges_chemin if edge in G_sub.edges()]
 
-    # Étiquettes de groupes
-    for grp in groupes_positions:
-        x, y = pos[f"label_{grp}"]
-        plt.text(
-            x, y, grp.upper(),
-            fontsize=14, fontweight="bold",
-            ha="center", va="bottom",
-            bbox=dict(facecolor="white", edgecolor="black", boxstyle="round,pad=0.3")
-        )
+        # Dessiner ces arêtes en couleur épaisse
+        nx.draw_networkx_edges(G_sub, pos,
+                               edgelist=edges_chemin,
+                               width=3.0,
+                               edge_color=[couleur] * len(edges_chemin))
 
-    plt.title(titre, fontsize=16)
+        # Étiquettes : nom de la colonne qui relie src→tgt
+        labels_path = {
+            (src, tgt): labels_arcs.get((src, tgt), "")
+            for (src, tgt) in edges_chemin
+        }
+        nx.draw_networkx_edge_labels(G_sub, pos,
+                                     edge_labels=labels_path,
+                                     font_size=7,
+                                     label_pos=0.5)
+
+    plt.title("Visualisation des chemins prioritaires (sous-graphe restreint)", fontsize=14)
     plt.axis("off")
     plt.tight_layout()
     plt.show()
 
-# === Main ===
-if __name__=="__main__":
-    graphe = construction_graphe_relations_entetes(dossier_entetes, tables_importantes)
-    enregistrer_graphe_dans_fichier(graphe, "graphe_relations.txt")
-
-    chemins = enregistrer_chemins_groupes_valides(graphe, nombre_max=5)
-    visualiser(graphe, chemins, groupes_tables, titre="Relations entre tables importantes")
-
+# Affichage final
+visualiser_chemins_final(graphe, labels_arcs, chemins)

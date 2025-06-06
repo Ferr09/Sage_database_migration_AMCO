@@ -21,7 +21,10 @@ from src.outils.chemins import (
     dossier_outils,
     dossier_db_access,
     dossier_csv_extraits,
-    dossier_xlsx_propres
+    dossier_xlsx_propres,
+    chemin_requirements_extraction,
+    chemin_requirements_mysql,
+    chemin_requirements_postgresql
 )
 
 # --------------------------------------------------------------------
@@ -70,11 +73,10 @@ def installer_requirements():
     """
     Installe les dépendances globales du projet depuis requirements.txt à la racine.
     """
-    fichier_req = racine_projet / "requirements.txt"
-    if fichier_req.is_file():
+    if chemin_requirements_extraction.is_file():
         print("Installation des dépendances depuis requirements.txt…")
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-r", str(fichier_req)],
+            [sys.executable, "-m", "pip", "install", "-r", str(chemin_requirements_extraction)],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT
         )
@@ -90,9 +92,9 @@ def installer_requirements_chargement(db_type: str):
     - 'mysql'      → requirements_mysql.txt
     """
     if db_type == "postgresql":
-        fichier_req = racine_projet / "requirements_postgres.txt"
+        fichier_req = chemin_requirements_postgresql
     elif db_type == "mysql":
-        fichier_req = racine_projet / "requirements_mysql.txt"
+        fichier_req = chemin_requirements_mysql
     else:
         print(f"Type de base non géré : {db_type}", file=sys.stderr)
         sys.exit(1)
