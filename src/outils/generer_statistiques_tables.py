@@ -2,11 +2,13 @@ import os
 import pandas as pd
 
 # === Dossiers ===
-dossier_csv = r"extraits\csv_extraits"
-dossier_statistiques = os.path.join(os.path.dirname(dossier_csv), "statistiques")
+from src.outils.chemins import (
+    dossier_tables_statistiques,
+    dossier_csv_extraits
+) 
 
 # Création du dossier pour les statistiques
-os.makedirs(dossier_statistiques, exist_ok=True)
+os.makedirs(dossier_tables_statistiques, exist_ok=True)
 
 # Listes des résultats
 tables_vides = []
@@ -15,12 +17,12 @@ tables_plus_de_10 = []
 tables_plus_de_100 = []
 
 # Analyse brute sans nettoyage
-fichiers = [f for f in os.listdir(dossier_csv) if f.endswith(".csv")]
-print(f"{len(fichiers)} fichier(s) détecté(s) dans le dossier : {dossier_csv}\n")
+fichiers = [f for f in os.listdir(dossier_csv_extraits) if f.endswith(".csv")]
+print(f"{len(fichiers)} fichier(s) détecté(s) dans le dossier : {dossier_csv_extraits}\n")
 
 for fichier in fichiers:
     nom_table = os.path.splitext(fichier)[0]
-    chemin_csv = os.path.join(dossier_csv, fichier)
+    chemin_csv = os.path.join(dossier_csv_extraits, fichier)
 
     try:
         df = pd.read_csv(chemin_csv, encoding="utf-8-sig")
@@ -42,7 +44,7 @@ for fichier in fichiers:
 
 # === Sauvegarde des fichiers de statistiques ===
 def enregistrer_liste(nom_fichier, liste):
-    with open(os.path.join(dossier_statistiques, nom_fichier), "w", encoding="utf-8") as f:
+    with open(os.path.join(dossier_tables_statistiques, nom_fichier), "w", encoding="utf-8") as f:
         for t in sorted(liste):
             f.write(t + "\n")
 
@@ -51,4 +53,4 @@ enregistrer_liste("tables_non_vides.txt", tables_non_vides)
 enregistrer_liste("tables_plus_de_10_lignes.txt", tables_plus_de_10)
 enregistrer_liste("tables_plus_de_100_lignes.txt", tables_plus_de_100)
 
-print(f"\nStatistiques enregistrées dans : {dossier_statistiques}")
+print(f"\nStatistiques enregistrées dans : {dossier_tables_statistiques}")
