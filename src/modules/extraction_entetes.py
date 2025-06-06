@@ -14,7 +14,7 @@ from src.outils.chemins import dossier_csv_extraits, dossier_xlsx_propres, racin
 # Définition des dossiers source et sortie en chemins absolus
 # --------------------------------------------------------------------
 dossier_source_csv = dossier_csv_extraits
-dossier_sortie_txt = racine_projet / "extraits" / "entetes_csv"
+dossier_sortie_txt = racine_projet / "statistiques" / "entetes_csv"
 
 # --------------------------------------------------------------------
 # Création du dossier de sortie s’il n’existe pas
