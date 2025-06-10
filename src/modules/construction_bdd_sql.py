@@ -22,7 +22,7 @@ from src.models.tables import (
 # --------------------------------------------------------------------
 # Importation des chemins absolus depuis outils.chemins
 # --------------------------------------------------------------------
-from outils.chemins import racine_projet, dossier_config, dossier_xlsx_propres
+from src.outils.chemins import racine_projet, dossier_config, dossier_xlsx_propres
 
 # --------------------------------------------------------------------
 # Fonctions utilitaires locales
