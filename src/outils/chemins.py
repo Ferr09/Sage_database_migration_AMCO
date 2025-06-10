@@ -37,9 +37,9 @@ dossier_txt_entetes = dossier_extraits / "entetes_csv"
 dossier_requirements = racine_projet / "requirements"
 
 # 3.3.2 Fichier requirements.txt pour les dépendances Python pour l'extraction
-chemin_requirements_extraction = dossier_requirements / "requirements_extraction.txt"
-chemin_requirements_mysql = dossier_requirements / "requirements_mysql.txt"  # pour compatibilité MySQL
-chemin_requirements_postgresql = dossier_requirements / "requirements_postgresql.txt"  # pour compatibilité PostgreSQL
+chemin_requirements_extraction = dossier_requirements / "requirements-extraction.txt"
+chemin_requirements_mysql = dossier_requirements / "requirements-mysql.txt"  # pour compatibilité MySQL
+chemin_requirements_postgresql = dossier_requirements / "requirements-postgresql.txt"  # pour compatibilité PostgreSQL
 
 # 3.4 Dossier « src/ » et ses sous-dossiers
 dossier_src = racine_projet / "src"
