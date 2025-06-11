@@ -5,7 +5,7 @@ import unicodedata
 import pandas as pd
 import json
 from pathlib import Path
-from sqlalchemy import text, create_engine
+from sqlalchemy import text, create_engine, Numeric, Integer, TIMESTAMP
 import importlib.util
 import argparse
 
