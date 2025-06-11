@@ -154,18 +154,19 @@ base_url = f"{driver}://{config['db_user']}:{config['db_password']}@{config['db_
 ssl_args = "?ssl_disabled=True" if db_type == "mysql" else ""
 
 if db_type == "postgresql":
-    # Esta parte permanece sin cambios.
+    # La lógica para PostgreSQL no cambia y NO USA AUTOCOMMIT
     moteur = create_engine(base_url + config['db_name'] + ssl_args)
+    moteur_ventes = moteur # En PG, usamos el mismo motor para todo
+    moteur_achats = moteur # En PG, usamos el mismo motor para todo
 else: # mysql
-    # Esta parte es la que se modifica.
-    moteur = create_engine(base_url + ssl_args) # Moteur racine pour créer/supprimer les DBs
+    # Moteur racine pour créer/supprimer les DBs (sin autocommit)
+    moteur = create_engine(base_url + ssl_args) 
     
-    # Creamos los motores para MySQL con AUTOCOMMIT para asegurar que los datos se guarden.
+    # ===== LA SOLUCIÓN DEFINITIVA ESTÁ AQUÍ =====
+    # Creamos motores específicos para cada DB con AUTOCOMMIT activado.
     print("Configuration des moteurs pour MySQL avec AUTOCOMMIT...")
     moteur_ventes = create_engine(base_url + "Ventes" + ssl_args, isolation_level="AUTOCOMMIT")
     moteur_achats = create_engine(base_url + "Achats" + ssl_args, isolation_level="AUTOCOMMIT")
-    
-
 
     # --- Création/Suppression Structures ---
     print(f"Configuration pour {db_type.upper()}...")
