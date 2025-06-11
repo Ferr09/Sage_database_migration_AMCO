@@ -56,41 +56,59 @@ def forcer_types_donnees(df, table_metadata):
     return df.where(pd.notna(df), None)
 
 def inserer_donnees(moteur_cible, tables_a_inserer, metadatas, nom_schema=None):
-    """Insère un dictionnaire de DataFrames dans la base de données."""
+    """Insère un dictionnaire de DataFrames dans la base de données de manière robuste."""
     print(f"\n--- DÉBUT DE L'INSERTION DANS {'LE SCHÉMA ' + nom_schema if nom_schema else 'LA BASE DE DONNÉES'} ---")
-    
+
+    # DICTIONNAIRE DE CORRESPONDANCE : La solution explicite et correcte.
+    # Fait le lien entre la partie clé du nom de la variable et le nom réel de la table dans la BD.
+    map_nom_variable_a_nom_table = {
+        "famille": "FAMILLE",
+        "articles": "ARTICLES",
+        "comptet": "COMPTET",
+        "fournisseur": "ARTFOURNISS",  # <-- Voici la connexion clé
+        "docligne": "DOCLIGNE"
+    }
+
     # Ordre d'insertion pour respecter les clés étrangères
-    ordre_insertion = [
-        "famille", "articles", "comptet", "fournisseur", "docligne"
-    ]
+    ordre_base = ["famille", "articles", "comptet", "fournisseur", "docligne"]
     
-    for nom_base in ordre_insertion:
-        # Trouver la bonne table dans les dictionnaires
-        nom_variable = next((k for k in tables_a_inserer.keys() if nom_base in k), None)
-        if nom_variable:
-            df = tables_a_inserer[nom_variable]
-            nom_table_db = nom_base.upper()
-            table_metadata = metadatas.tables[nom_table_db]
+    # Créer un ordre de traitement basé sur les clés des DataFrames à insérer
+    cles_a_traiter = sorted(
+        tables_a_inserer.keys(),
+        key=lambda k: next((ordre_base.index(b) for b in ordre_base if b in k), float('inf'))
+    )
 
-            # Forcer les types juste avant l'insertion
-            df_typed = forcer_types_donnees(df.copy(), table_metadata)
+    for nom_cle_variable in cles_a_traiter:
+        try:
+            # Trouver la base du nom (ex: "fournisseur_achats" -> "fournisseur")
+            base_name = next(b for b in ordre_base if b in nom_cle_variable)
             
-            try:
-                print(f"Insertion de {len(df_typed)} lignes dans la table '{nom_table_db}'...")
-                df_typed.to_sql(
-                    name=nom_table_db,
-                    con=moteur_cible,
-                    if_exists="append",
-                    index=False,
-                    schema=nom_schema,
-                    chunksize=1000,
-                    method='multi'
-                )
-                print(f"  -> Succès.")
-            except Exception as e:
-                print(f"  -> ERREUR lors de l'insertion dans '{nom_table_db}': {e}")
+            # Recherche explicite dans le dictionnaire pour obtenir le nom réel de la table
+            nom_table_db = map_nom_variable_a_nom_table[base_name]
+            
+            df = tables_a_inserer[nom_cle_variable]
+            table_metadata = metadatas.tables[nom_table_db]
+            df_typed = forcer_types_donnees(df.copy(), table_metadata)
 
-# --------------------------------------------------------------------
+            print(f"Insertion de {len(df_typed)} lignes dans la table '{nom_table_db}'...")
+            df_typed.to_sql(
+                name=nom_table_db,
+                con=moteur_cible,
+                if_exists="append",
+                index=False,
+                schema=nom_schema,
+                chunksize=1000,
+                method='multi'
+            )
+            print(f"  -> Succès.")
+        except StopIteration:
+            print(f"Avertissement : La variable '{nom_cle_variable}' n'a pas de correspondance dans l'ordre d'insertion et sera ignorée.")
+        except KeyError:
+            print(f"ERREUR CRITIQUE : La table '{nom_table_db}' n'a pas été trouvée dans les métadonnées. Vérifiez les noms.")
+        except Exception as e:
+            print(f"  -> ERREUR INCONNUE lors de l'insertion dans '{nom_table_db}': {e}")
+            
+            # --------------------------------------------------------------------
 # Script principal
 # --------------------------------------------------------------------
 if __name__ == "__main__":
