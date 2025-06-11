@@ -1,4 +1,7 @@
-# Requirements for MySQL import
-python-dotenv # for environment variables
-sqlalchemy # for database interaction
-pymysql>=1.0 # MySQL database adapter
+# Version compatible avec MySQL 5.6 et Windows 7
+
+pymysql==0.9.3              # Adapté aux anciennes versions de MySQL (5.6)
+sqlalchemy==1.4.49          # Dernière version stable compatible avec pymysql 0.9.x
+python-dotenv==0.21.0       # Permet de charger les variables depuis un fichier .env
+pandas==1.3.5               # Compatible avec Python 3.8, nécessaire pour manipuler les données
+openpyxl==3.0.10            # Utilisé pour lire les fichiers Excel (.xlsx)
