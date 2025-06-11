@@ -43,10 +43,12 @@ def nettoyer_texte_objet(df):
     for col in df.select_dtypes(include=["object"]).columns:
         df[col] = (
             df[col].astype(str)
-                  .replace('nan', None)
-                  .apply(lambda x: unicodedata.normalize('NFKC', x)
-                         .encode('utf-8', errors='replace')
-                         .decode('utf-8', errors='replace') if x else None)
+                    .replace('nan', None)
+                    .apply(lambda x: unicodedata.normalize('NFKC', x)
+                            .encode('utf-8', errors='replace')
+                            .decode('utf-8', errors='replace') if x else None)
+                    )
+
     return df
 
 def charger_fichiers_excel(dossier, fichiers):
