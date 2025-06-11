@@ -30,15 +30,15 @@ from src.outils.chemins import racine_projet, dossier_config, dossier_xlsx_propr
 # --------------------------------------------------------------------
 def detect_driver():
     """
-    Détecte quel driver SQL est installé (psycopg2 ou pymysql)
-    et retourne la chaîne driver SQLAlchemy sans port.
+    Détecte quel driver SQL est installé (psycopg2 ou mysql-connector-python)
+    et retourne la chaîne driver SQLAlchemy.
     """
     if importlib.util.find_spec("psycopg2"):
         return "postgresql+psycopg2"
-    elif importlib.util.find_spec("pymysql"):
-        return "mysql+pymysql"
+    elif importlib.util.find_spec("mysql.connector"):
+        return "mysql+mysqlconnector"
     else:
-        raise ImportError("Aucun driver compatible détecté (psycopg2 ou pymysql).")
+        raise ImportError("Aucun driver compatible détecté (psycopg2 ou mysql-connector-python).")
 
 def filtrer_colonnes(df: pd.DataFrame, table_sqlalchemy: Table) -> pd.DataFrame:
     """
