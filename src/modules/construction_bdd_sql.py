@@ -9,6 +9,7 @@ from sqlalchemy import Date, text, Numeric, create_engine, Table, Column, String
 from sqlalchemy.exc import SQLAlchemyError
 import importlib.util
 import argparse
+import time
 
 # --------------------------------------------------------------------
 # Importation des métadonnées et définitions de tables depuis models.tables
@@ -126,7 +127,7 @@ driver = detect_driver()
 # --------------------------------------------------------------------
 url_connexion = (
     f"{driver}://{config['db_user']}:{config['db_password']}"
-    f"@{config['db_host']}:{config['db_port']}/{config['db_name']}"
+    f"@{config['db_host']}:{config['db_port']}/{config['db_name']}?ssl_disabled=True"
 )
 
 # Création du moteur SQLAlchemy
@@ -141,6 +142,9 @@ with moteur.begin() as conn:
     conn.execute(text('DROP SCHEMA IF EXISTS "Achats" CASCADE;'))
     conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "Achats" AUTHORIZATION "{utilisateur}";'))
     conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "Ventes" AUTHORIZATION "{utilisateur}";'))
+
+
+time.sleep(1)
 
 # Test de la connexion
 try:

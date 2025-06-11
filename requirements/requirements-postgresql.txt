@@ -1,4 +1,7 @@
-# requiremets for PostgreSQL import
-python-dotenv # for environment variables
-sqlalchemy # for database interaction
-psycopg2-binary # PostgreSQL database adapter
+# Dépendances pour l'importation de données dans une base PostgreSQL (version 12)
+
+psycopg2-binary==2.9.9       # Adapté à PostgreSQL 9.6 à 15, compatible avec Python 3.8
+sqlalchemy==1.4.49           # Version stable avant la rupture d'API avec SQLAlchemy 2.x
+python-dotenv==0.21.0        # Pour charger les variables d'environnement à partir d’un fichier .env (facultatif)
+pandas==1.3.5                # Pour manipuler les données tabulaires, compatible Python 3.8
+openpyxl==3.0.10             # Pour lire les fichiers Excel (.xlsx)
