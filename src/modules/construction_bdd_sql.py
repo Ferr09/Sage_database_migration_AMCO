@@ -56,23 +56,25 @@ def forcer_types_donnees(df, table_metadata):
     return df.where(pd.notna(df), None)
 
 def inserer_donnees(moteur_cible, tables_a_inserer, metadatas, nom_schema=None):
-    """Insère un dictionnaire de DataFrames dans la base de données de manière robuste."""
-    print(f"\n--- DÉBUT DE L'INSERTION DANS {'LE SCHÉMA ' + nom_schema if nom_schema else 'LA BASE DE DONNÉES'} ---")
+    """
+    Insère un dictionnaire de DataFrames dans la base de données de manière robuste,
+    en fournissant un rapport de débogage détaillé à chaque étape.
+    """
+    print(f"\n--- DÉBUT DU PROCESSUS D'INSERTION DANS {'LE SCHÉMA ' + nom_schema if nom_schema else 'LA BASE DE DONNÉES'} ---")
 
-    # DICTIONNAIRE DE CORRESPONDANCE : La solution explicite et correcte.
-    # Fait le lien entre la partie clé du nom de la variable et le nom réel de la table dans la BD.
+    if not tables_a_inserer:
+        print("Avertissement : Aucun DataFrame à insérer. Le processus est terminé.")
+        return
+
     map_nom_variable_a_nom_table = {
         "famille": "FAMILLE",
         "articles": "ARTICLES",
         "comptet": "COMPTET",
-        "fournisseur": "ARTFOURNISS",  # <-- Voici la connexion clé
+        "fournisseur": "ARTFOURNISS",
         "docligne": "DOCLIGNE"
     }
-
-    # Ordre d'insertion pour respecter les clés étrangères
     ordre_base = ["famille", "articles", "comptet", "fournisseur", "docligne"]
     
-    # Créer un ordre de traitement basé sur les clés des DataFrames à insérer
     cles_a_traiter = sorted(
         tables_a_inserer.keys(),
         key=lambda k: next((ordre_base.index(b) for b in ordre_base if b in k), float('inf'))
@@ -80,17 +82,36 @@ def inserer_donnees(moteur_cible, tables_a_inserer, metadatas, nom_schema=None):
 
     for nom_cle_variable in cles_a_traiter:
         try:
-            # Trouver la base du nom (ex: "fournisseur_achats" -> "fournisseur")
             base_name = next(b for b in ordre_base if b in nom_cle_variable)
-            
-            # Recherche explicite dans le dictionnaire pour obtenir le nom réel de la table
             nom_table_db = map_nom_variable_a_nom_table[base_name]
             
+            # --- ÉTAPE 1 : VÉRIFICATION INITIALE ---
+            print(f"\n[Traitement de la table : {nom_table_db}]")
             df = tables_a_inserer[nom_cle_variable]
+            lignes_initiales = len(df)
+            print(f"  - Lignes trouvées dans le fichier Excel : {lignes_initiales}")
+
+            if df.empty:
+                print("  -> DataFrame initial vide. Aucune action requise.")
+                continue  # Passe à la table suivante
+
+            # --- ÉTAPE 2 : CONVERSION DES TYPES ET VÉRIFICATION ---
             table_metadata = metadatas.tables[nom_table_db]
             df_typed = forcer_types_donnees(df.copy(), table_metadata)
+            lignes_apres_conversion = len(df_typed)
+            
+            print(f"  - Lignes restantes après conversion des types : {lignes_apres_conversion}")
 
-            print(f"Insertion de {len(df_typed)} lignes dans la table '{nom_table_db}'...")
+            if lignes_apres_conversion < lignes_initiales:
+                pertes = lignes_initiales - lignes_apres_conversion
+                print(f"  -> AVERTISSEMENT : {pertes} ligne(s) ont potentiellement été perdues (valeurs non conformes).")
+
+            if df_typed.empty:
+                print(f"  -> DataFrame final vide pour '{nom_table_db}'. Aucune ligne ne sera insérée.")
+                continue # Passe à la table suivante si le df est maintenant vide
+
+            # --- ÉTAPE 3 : INSERTION EN BASE DE DONNÉES ---
+            print(f"  - Tentative d'insertion de {lignes_apres_conversion} lignes dans la table '{nom_table_db}'...")
             df_typed.to_sql(
                 name=nom_table_db,
                 con=moteur_cible,
@@ -100,13 +121,16 @@ def inserer_donnees(moteur_cible, tables_a_inserer, metadatas, nom_schema=None):
                 chunksize=1000,
                 method='multi'
             )
-            print(f"  -> Succès.")
+            print(f"  -> SUCCÈS : Les données pour '{nom_table_db}' ont été insérées.")
+
         except StopIteration:
             print(f"Avertissement : La variable '{nom_cle_variable}' n'a pas de correspondance dans l'ordre d'insertion et sera ignorée.")
         except KeyError:
-            print(f"ERREUR CRITIQUE : La table '{nom_table_db}' n'a pas été trouvée dans les métadonnées. Vérifiez les noms.")
+            # Cette erreur est plus précise maintenant
+            print(f"ERREUR CRITIQUE : La table '{nom_table_db}' est introuvable dans les métadonnées.")
+            print("             Veuillez vérifier que le nom est correct dans `map_nom_variable_a_nom_table` ET dans `tables.py`.")
         except Exception as e:
-            print(f"  -> ERREUR INCONNUE lors de l'insertion dans '{nom_table_db}': {e}")
+            print(f"  -> ERREUR INCONNUE lors du traitement de la table '{nom_table_db}': {e}")
             
             # --------------------------------------------------------------------
 # Script principal
@@ -124,17 +148,24 @@ if __name__ == "__main__":
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
-    # --- Création Moteurs SQLAlchemy ---
-    driver = detect_driver()
-    base_url = f"{driver}://{config['db_user']}:{config['db_password']}@{config['db_host']}:{config['db_port']}/"
-    ssl_args = "?ssl_disabled=True" if db_type == "mysql" else ""
+# --- Création Moteurs SQLAlchemy ---
+driver = detect_driver()
+base_url = f"{driver}://{config['db_user']}:{config['db_password']}@{config['db_host']}:{config['db_port']}/"
+ssl_args = "?ssl_disabled=True" if db_type == "mysql" else ""
 
-    if db_type == "postgresql":
-        moteur = create_engine(base_url + config['db_name'] + ssl_args)
-    else: # mysql
-        moteur = create_engine(base_url + ssl_args) # Moteur racine pour créer/supprimer les DBs
-        moteur_ventes = create_engine(base_url + "Ventes" + ssl_args)
-        moteur_achats = create_engine(base_url + "Achats" + ssl_args)
+if db_type == "postgresql":
+    # Esta parte permanece sin cambios.
+    moteur = create_engine(base_url + config['db_name'] + ssl_args)
+else: # mysql
+    # Esta parte es la que se modifica.
+    moteur = create_engine(base_url + ssl_args) # Moteur racine pour créer/supprimer les DBs
+    
+    # Creamos los motores para MySQL con AUTOCOMMIT para asegurar que los datos se guarden.
+    print("Configuration des moteurs pour MySQL avec AUTOCOMMIT...")
+    moteur_ventes = create_engine(base_url + "Ventes" + ssl_args, isolation_level="AUTOCOMMIT")
+    moteur_achats = create_engine(base_url + "Achats" + ssl_args, isolation_level="AUTOCOMMIT")
+    
+
 
     # --- Création/Suppression Structures ---
     print(f"Configuration pour {db_type.upper()}...")
@@ -166,7 +197,25 @@ if __name__ == "__main__":
     
     tables_ventes = charger_fichiers_excel(dossier_xlsx_propres, fichiers_ventes)
     tables_achats = charger_fichiers_excel(dossier_xlsx_propres, fichiers_achats)
-    
+
+    # ===== DÉBUT DU CODE DE DÉBOGAGE 1 =====
+    print("\n--- DÉBOGAGE : VÉRIFICATION DES DATAFRAMES APRÈS CHARGEMENT ---")
+    for nom, df in tables_ventes.items():
+        if not df.empty:
+            print(f"[Ventes] DataFrame '{nom}' chargé avec {len(df)} lignes. Deux premières lignes :")
+            print(df.head(2))
+        else:
+            print(f"[Ventes] ¡¡¡AVERTISSEMENT!!! Le DataFrame '{nom}' est VIDE après chargement.")
+
+    for nom, df in tables_achats.items():
+        if not df.empty:
+            print(f"[Achats] DataFrame '{nom}' chargé avec {len(df)} lignes. Deux premières lignes :")
+            print(df.head(2))
+        else:
+            print(f"[Achats] ¡¡¡AVERTISSEMENT!!! Le DataFrame '{nom}' est VIDE après chargement.")
+    print("--- FIN DU DÉBOGAGE 1 ---\n")
+    # ===== FIN DU CODE DE DÉBOGAGE 1 =====
+
     # --- Insertion des Données ---
     if db_type == "postgresql":
         inserer_donnees(moteur, tables_ventes, metadata_ventes, nom_schema="Ventes")
