@@ -119,7 +119,7 @@ def inserer_donnees(moteur_cible, tables_a_inserer, metadatas, nom_schema=None):
                 index=False,
                 schema=nom_schema,
                 chunksize=1000,
-                method=None # Pour debugging, on utilise la méthode par défaut, au lieu de method='multi'
+                method='multi'
             )
             print(f"  -> SUCCÈS : Les données pour '{nom_table_db}' ont été insérées.")
 
