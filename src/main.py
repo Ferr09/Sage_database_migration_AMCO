@@ -7,6 +7,7 @@ import argparse
 import subprocess
 import venv
 import json
+import getpass
 from pathlib import Path
 
 # --------------------------------------------------------------------
@@ -185,7 +186,7 @@ def config_bdd() -> (str, bool):  # type: ignore
     cfg["db_port"] = port_saisi or default_port
     cfg["db_name"] = input("Nom de la base : ").strip()
     cfg["db_user"] = input("Utilisateur : ").strip()
-    cfg["db_password"] = input("Mot de passe : ").strip()
+    cfg["db_password"] = getpass.getpass("Mot de passe : ").strip()
 
     # S’assure que le répertoire de config existe
     if not dossier_config.exists():
