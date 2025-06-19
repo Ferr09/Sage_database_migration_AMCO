@@ -80,59 +80,72 @@ def inserer_donnees(moteur_cible, tables_a_inserer, metadatas, nom_schema=None):
         key=lambda k: next((ordre_base.index(b) for b in ordre_base if b in k), float('inf'))
     )
 
-    for nom_cle_variable in cles_a_traiter:
-        try:
-            base_name = next(b for b in ordre_base if b in nom_cle_variable)
-            nom_table_db = map_nom_variable_a_nom_table[base_name]
-            
-            # --- ÉTAPE 1 : VÉRIFICATION INITIALE ---
-            print(f"\n[Traitement de la table : {nom_table_db}]")
-            df = tables_a_inserer[nom_cle_variable]
-            lignes_initiales = len(df)
-            print(f"  - Lignes trouvées dans le fichier Excel : {lignes_initiales}")
+    # ==================== DÉBUT DE LA MODIFICATION ====================
+    # On établit une seule connexion pour l'ensemble des insertions de ce lot.
+    with moteur_cible.connect() as conn:
+        
+        # ✅ Instrucción a añadir aquí (solo para MySQL)
+        # On vérifie si le dialecte est MySQL avant d'exécuter la commande.
+        if moteur_cible.dialect.name == 'mysql':
+            print("  - Configuration de la session MySQL pour les paquets volumineux (128 Mo)...")
+            conn.execute(text("SET SESSION max_allowed_packet = 134217728"))
+        
+        for nom_cle_variable in cles_a_traiter:
+            try:
+                base_name = next(b for b in ordre_base if b in nom_cle_variable)
+                nom_table_db = map_nom_variable_a_nom_table[base_name]
+                
+                # --- ÉTAPE 1 : VÉRIFICATION INITIALE ---
+                print(f"\n[Traitement de la table : {nom_table_db}]")
+                df = tables_a_inserer[nom_cle_variable]
+                lignes_initiales = len(df)
+                print(f"  - Lignes trouvées dans le fichier Excel : {lignes_initiales}")
 
-            if df.empty:
-                print("  -> DataFrame initial vide. Aucune action requise.")
-                continue  # Passe à la table suivante
+                if df.empty:
+                    print("  -> DataFrame initial vide. Aucune action requise.")
+                    continue
 
-            # --- ÉTAPE 2 : CONVERSION DES TYPES ET VÉRIFICATION ---
-            table_metadata = metadatas.tables[nom_table_db]
-            df_typed = forcer_types_donnees(df.copy(), table_metadata)
-            lignes_apres_conversion = len(df_typed)
-            
-            print(f"  - Lignes restantes après conversion des types : {lignes_apres_conversion}")
+                # --- ÉTAPE 2 : CONVERSION DES TYPES ET VÉRIFICATION ---
+                table_metadata = metadatas.tables[nom_table_db]
+                df_typed = forcer_types_donnees(df.copy(), table_metadata)
+                lignes_apres_conversion = len(df_typed)
+                
+                print(f"  - Lignes restantes après conversion des types : {lignes_apres_conversion}")
 
-            if lignes_apres_conversion < lignes_initiales:
-                pertes = lignes_initiales - lignes_apres_conversion
-                print(f"  -> AVERTISSEMENT : {pertes} ligne(s) ont potentiellement été perdues (valeurs non conformes).")
+                if lignes_apres_conversion < lignes_initiales:
+                    pertes = lignes_initiales - lignes_apres_conversion
+                    print(f"  -> AVERTISSEMENT : {pertes} ligne(s) ont potentiellement été perdues (valeurs non conformes).")
 
-            if df_typed.empty:
-                print(f"  -> DataFrame final vide pour '{nom_table_db}'. Aucune ligne ne sera insérée.")
-                continue # Passe à la table suivante si le df est maintenant vide
+                if df_typed.empty:
+                    print(f"  -> DataFrame final vide pour '{nom_table_db}'. Aucune ligne ne sera insérée.")
+                    continue
 
-            # --- ÉTAPE 3 : INSERTION EN BASE DE DONNÉES ---
-            print(f"  - Tentative d'insertion de {lignes_apres_conversion} lignes dans la table '{nom_table_db}'...")
-            df_typed.to_sql(
-                name=nom_table_db,
-                con=moteur_cible,
-                if_exists="append",
-                index=False,
-                schema=nom_schema,
-                chunksize=1000,
-                method='multi'
-            )
-            print(f"  -> SUCCÈS : Les données pour '{nom_table_db}' ont été insérées.")
+                # --- ÉTAPE 3 : INSERTION EN BASE DE DONNÉES ---
+                print(f"  - Tentative d'insertion de {lignes_apres_conversion} lignes dans la table '{nom_table_db}'...")
+                df_typed.to_sql(
+                    name=nom_table_db,
+                    con=conn,  # <-- ON UTILISE LA CONNEXION (conn) ET NON LE MOTEUR
+                    if_exists="append",
+                    index=False,
+                    schema=nom_schema,
+                    chunksize=1000,
+                    method='multi'
+                )
+                print(f"  -> SUCCÈS : Les données pour '{nom_table_db}' ont été insérées.")
 
-        except StopIteration:
-            print(f"Avertissement : La variable '{nom_cle_variable}' n'a pas de correspondance dans l'ordre d'insertion et sera ignorée.")
-        except KeyError:
-            # Cette erreur est plus précise maintenant
-            print(f"ERREUR CRITIQUE : La table '{nom_table_db}' est introuvable dans les métadonnées.")
-            print("             Veuillez vérifier que le nom est correct dans `map_nom_variable_a_nom_table` ET dans `tables.py`.")
-        except Exception as e:
-            print(f"  -> ERREUR INCONNUE lors du traitement de la table '{nom_table_db}': {e}")
-            
-            # --------------------------------------------------------------------
+            except StopIteration:
+                print(f"Avertissement : La variable '{nom_cle_variable}' n'a pas de correspondance dans l'ordre d'insertion et sera ignorée.")
+            except KeyError as e:
+                print(f"ERREUR CRITIQUE : La table '{nom_table_db}' ({e}) est introuvable dans les métadonnées.")
+                print("             Veuillez vérifier que le nom est correct dans `map_nom_variable_a_nom_table` ET dans `tables.py`.")
+            except Exception as e:
+                print(f"  -> ERREUR INCONNUE lors du traitement de la table '{nom_table_db}': {e}")
+        
+        # Le bloc 'with' gère automatiquement le commit (si succès) ou le rollback (si erreur).
+        # Pour les moteurs avec AUTOCOMMIT, cette gestion est transparente.
+    # ==================== FIN DE LA MODIFICATION ======================
+
+# --------------------------------------------------------------------
 # Script principal
 # --------------------------------------------------------------------
 if __name__ == "__main__":
@@ -148,40 +161,39 @@ if __name__ == "__main__":
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
-# --- Création Moteurs SQLAlchemy ---
-driver = detect_driver()
-base_url = f"{driver}://{config['db_user']}:{config['db_password']}@{config['db_host']}:{config['db_port']}/"
-ssl_args = "?ssl_disabled=True" if db_type == "mysql" else ""
+    # --- Création Moteurs SQLAlchemy ---
+    driver = detect_driver()
+    base_url = f"{driver}://{config['db_user']}:{config['db_password']}@{config['db_host']}:{config['db_port']}/"
+    ssl_args = "?ssl_disabled=True" if db_type == "mysql" else ""
 
-if db_type == "postgresql":
-    # La lógica para PostgreSQL no cambia y NO USA AUTOCOMMIT
-    moteur = create_engine(base_url + config['db_name'] + ssl_args)
-    moteur_ventes = moteur # En PG, usamos el mismo motor para todo
-    moteur_achats = moteur # En PG, usamos el mismo motor para todo
-else: # mysql
-    # Moteur racine pour créer/supprimer les DBs (sin autocommit)
-    moteur = create_engine(base_url + ssl_args) 
-    
-    # ===== LA SOLUCIÓN DEFINITIVA ESTÁ AQUÍ =====
-    # Creamos motores específicos para cada DB con AUTOCOMMIT activado.
-    print("Configuration des moteurs pour MySQL avec AUTOCOMMIT...")
-    moteur_ventes = create_engine(base_url + "Ventes" + ssl_args, isolation_level="AUTOCOMMIT")
-    moteur_achats = create_engine(base_url + "Achats" + ssl_args, isolation_level="AUTOCOMMIT")
+    if db_type == "postgresql":
+        moteur = create_engine(base_url + config['db_name'] + ssl_args)
+        moteur_ventes = moteur
+        moteur_achats = moteur
+    else: # mysql
+        moteur = create_engine(base_url + ssl_args) 
+        print("Configuration des moteurs pour MySQL avec AUTOCOMMIT...")
+        moteur_ventes = create_engine(base_url + "Ventes" + ssl_args, isolation_level="AUTOCOMMIT")
+        moteur_achats = create_engine(base_url + "Achats" + ssl_args, isolation_level="AUTOCOMMIT")
 
     # --- Création/Suppression Structures ---
     print(f"Configuration pour {db_type.upper()}...")
     with moteur.connect() as conn:
         if db_type == "postgresql":
+            # Pour PostgreSQL, on utilise des schémas. La transaction est gérée par le bloc `with`.
             conn.execute(text('DROP SCHEMA IF EXISTS "Ventes" CASCADE;'))
             conn.execute(text('DROP SCHEMA IF EXISTS "Achats" CASCADE;'))
-            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "Ventes";'))
-            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "Achats";'))
+            conn.execute(text('CREATE SCHEMA IF NOT EXISTS "Ventes";'))
+            conn.execute(text('CREATE SCHEMA IF NOT EXISTS "Achats";'))
+            conn.commit() # Explicite pour les commandes DDL dans certaines versions/configs
         else:
+            # Pour MySQL, on utilise des bases de données séparées.
+            # AUTOCOMMIT est géré par le moteur, mais on peut être explicite pour la clarté.
             conn.execute(text("DROP DATABASE IF EXISTS Ventes;"))
             conn.execute(text("DROP DATABASE IF EXISTS Achats;"))
             conn.execute(text("CREATE DATABASE Ventes CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"))
             conn.execute(text("CREATE DATABASE Achats CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"))
-        conn.commit() if hasattr(conn, 'commit') else None # For SQLAlchemy 2.0+ with legacy connections
+    print("Bases de données / Schémas configurés.")
 
     # --- Création des Tables ---
     if db_type == "postgresql":
@@ -198,25 +210,7 @@ else: # mysql
     
     tables_ventes = charger_fichiers_excel(dossier_xlsx_propres, fichiers_ventes)
     tables_achats = charger_fichiers_excel(dossier_xlsx_propres, fichiers_achats)
-
-    # ===== DÉBUT DU CODE DE DÉBOGAGE 1 =====
-    print("\n--- DÉBOGAGE : VÉRIFICATION DES DATAFRAMES APRÈS CHARGEMENT ---")
-    for nom, df in tables_ventes.items():
-        if not df.empty:
-            print(f"[Ventes] DataFrame '{nom}' chargé avec {len(df)} lignes. Deux premières lignes :")
-            print(df.head(2))
-        else:
-            print(f"[Ventes] ¡¡¡AVERTISSEMENT!!! Le DataFrame '{nom}' est VIDE après chargement.")
-
-    for nom, df in tables_achats.items():
-        if not df.empty:
-            print(f"[Achats] DataFrame '{nom}' chargé avec {len(df)} lignes. Deux premières lignes :")
-            print(df.head(2))
-        else:
-            print(f"[Achats] ¡¡¡AVERTISSEMENT!!! Le DataFrame '{nom}' est VIDE après chargement.")
-    print("--- FIN DU DÉBOGAGE 1 ---\n")
-    # ===== FIN DU CODE DE DÉBOGAGE 1 =====
-
+    
     # --- Insertion des Données ---
     if db_type == "postgresql":
         inserer_donnees(moteur, tables_ventes, metadata_ventes, nom_schema="Ventes")
