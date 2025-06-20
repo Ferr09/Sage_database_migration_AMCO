@@ -49,7 +49,7 @@ def forcer_types_donnees(df, table_metadata):
                     if isinstance(col_type.type, Integer):
                         # Gère les NaN avant de convertir en entier nullable
                         df[col_name] = df[col_name].astype('Int64')
-                elif isinstance(col_type.type, (TIMESTAMP)):
+                elif isinstance(col_type.type, TIMESTAMP):
                     df[col_name] = pd.to_datetime(df[col_name], errors='coerce')
             except Exception as e:
                 print(f"  Avertissement lors de la conversion de la colonne '{col_name}': {e}")
@@ -81,11 +81,8 @@ def inserer_donnees(moteur_cible, tables_a_inserer, metadatas, nom_schema=None):
     )
 
     # ==================== DÉBUT DE LA MODIFICATION ====================
-    # On établit une seule connexion pour l'ensemble des insertions de ce lot.
     with moteur_cible.connect() as conn:
-        
-        # ✅ Instrucción a añadir aquí (solo para MySQL)
-        # On vérifie si le dialecte est MySQL avant d'exécuter la commande.
+        # ✅ Instruction pour MySQL : configurer la session après héritage du global
         if moteur_cible.dialect.name == 'mysql':
             print("  - Configuration de la session MySQL pour les paquets volumineux (128 Mo)...")
             conn.execute(text("SET SESSION max_allowed_packet = 134217728"))
@@ -124,7 +121,7 @@ def inserer_donnees(moteur_cible, tables_a_inserer, metadatas, nom_schema=None):
                 print(f"  - Tentative d'insertion de {lignes_apres_conversion} lignes dans la table '{nom_table_db}'...")
                 df_typed.to_sql(
                     name=nom_table_db,
-                    con=conn,  # <-- ON UTILISE LA CONNEXION (conn) ET NON LE MOTEUR
+                    con=conn,
                     if_exists="append",
                     index=False,
                     schema=nom_schema,
@@ -134,15 +131,11 @@ def inserer_donnees(moteur_cible, tables_a_inserer, metadatas, nom_schema=None):
                 print(f"  -> SUCCÈS : Les données pour '{nom_table_db}' ont été insérées.")
 
             except StopIteration:
-                print(f"Avertissement : La variable '{nom_cle_variable}' n'a pas de correspondance dans l'ordre d'insertion et sera ignorée.")
+                print(f"Avertissement : La variable '{nom_cle_variable}' n'a pas de correspondance et sera ignorée.")
             except KeyError as e:
                 print(f"ERREUR CRITIQUE : La table '{nom_table_db}' ({e}) est introuvable dans les métadonnées.")
-                print("             Veuillez vérifier que le nom est correct dans `map_nom_variable_a_nom_table` ET dans `tables.py`.")
             except Exception as e:
                 print(f"  -> ERREUR INCONNUE lors du traitement de la table '{nom_table_db}': {e}")
-        
-        # Le bloc 'with' gère automatiquement le commit (si succès) ou le rollback (si erreur).
-        # Pour les moteurs avec AUTOCOMMIT, cette gestion est transparente.
     # ==================== FIN DE LA MODIFICATION ======================
 
 # --------------------------------------------------------------------
@@ -171,24 +164,35 @@ if __name__ == "__main__":
         moteur_ventes = moteur
         moteur_achats = moteur
     else: # mysql
-        moteur = create_engine(base_url + ssl_args) 
-        print("Configuration des moteurs pour MySQL avec AUTOCOMMIT...")
-        moteur_ventes = create_engine(base_url + "Ventes" + ssl_args, isolation_level="AUTOCOMMIT")
-        moteur_achats = create_engine(base_url + "Achats" + ssl_args, isolation_level="AUTOCOMMIT")
+        # 1) Création initiale pour SET GLOBAL
+        moteur = create_engine(base_url + ssl_args)
+        print("Augmentation globale de max_allowed_packet à 128 Mo...")
+        with moteur.connect() as conn_root:
+            conn_root.execute(text("SET GLOBAL max_allowed_packet = 134217728"))
+        # 2) Vider le pool pour appliquer la nouvelle valeur
+        moteur.dispose()
+        # 3) Recréation des moteurs MySQL
+        print("Recréation des moteurs MySQL pour hériter du nouveau max_allowed_packet")
+        moteur = create_engine(base_url + ssl_args)
+        moteur_ventes = create_engine(
+            base_url + "Ventes" + ssl_args,
+            isolation_level="AUTOCOMMIT"
+        )
+        moteur_achats = create_engine(
+            base_url + "Achats" + ssl_args,
+            isolation_level="AUTOCOMMIT"
+        )
 
     # --- Création/Suppression Structures ---
     print(f"Configuration pour {db_type.upper()}...")
     with moteur.connect() as conn:
         if db_type == "postgresql":
-            # Pour PostgreSQL, on utilise des schémas. La transaction est gérée par le bloc `with`.
             conn.execute(text('DROP SCHEMA IF EXISTS "Ventes" CASCADE;'))
             conn.execute(text('DROP SCHEMA IF EXISTS "Achats" CASCADE;'))
             conn.execute(text('CREATE SCHEMA IF NOT EXISTS "Ventes";'))
             conn.execute(text('CREATE SCHEMA IF NOT EXISTS "Achats";'))
-            conn.commit() # Explicite pour les commandes DDL dans certaines versions/configs
+            conn.commit()
         else:
-            # Pour MySQL, on utilise des bases de données séparées.
-            # AUTOCOMMIT est géré par le moteur, mais on peut être explicite pour la clarté.
             conn.execute(text("DROP DATABASE IF EXISTS Ventes;"))
             conn.execute(text("DROP DATABASE IF EXISTS Achats;"))
             conn.execute(text("CREATE DATABASE Ventes CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"))
@@ -205,9 +209,19 @@ if __name__ == "__main__":
     print("Structure des tables créée.")
 
     # --- Chargement des Fichiers Excel ---
-    fichiers_ventes = {"famille_ventes": "F_FAMILLE_propre.xlsx", "articles_ventes": "F_ARTICLE_propre.xlsx", "comptet_ventes": "F_COMPTET_propre.xlsx", "docligne_ventes": "F_DOCLIGNE_propre.xlsx"}
-    fichiers_achats = {"famille_achats": "F_FAMILLE_propre.xlsx", "articles_achats": "F_ARTICLE_propre.xlsx", "comptet_achats": "F_COMPTET_propre.xlsx", "fournisseur_achats": "F_ARTFOURNISS_propre.xlsx", "docligne_achats": "F_DOCLIGNE_propre.xlsx"}
-    
+    fichiers_ventes = {
+        "famille_ventes": "F_FAMILLE_propre.xlsx",
+        "articles_ventes": "F_ARTICLE_propre.xlsx",
+        "comptet_ventes": "F_COMPTET_propre.xlsx",
+        "docligne_ventes": "F_DOCLIGNE_propre.xlsx"
+    }
+    fichiers_achats = {
+        "famille_achats": "F_FAMILLE_propre.xlsx",
+        "articles_achats": "F_ARTICLE_propre.xlsx",
+        "comptet_achats": "F_COMPTET_propre.xlsx",
+        "fournisseur_achats": "F_ARTFOURNISS_propre.xlsx",
+        "docligne_achats": "F_DOCLIGNE_propre.xlsx"
+    }
     tables_ventes = charger_fichiers_excel(dossier_xlsx_propres, fichiers_ventes)
     tables_achats = charger_fichiers_excel(dossier_xlsx_propres, fichiers_achats)
     
