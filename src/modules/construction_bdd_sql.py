@@ -67,8 +67,14 @@ def inserer_donnees(moteur, tables, metadatas, schema=None):
             print(f"[{table_db}] vide, skipped.")
             continue
 
+        # --- Filtrar solo columnas que existen en la metadata ---
+        cols_meta = set(metadatas.tables[table_db].columns.keys())
+        cols_comunes = [c for c in df.columns if c in cols_meta]
+        df = df[cols_comunes]
+
+        # Conversión de tipos
         df2 = forcer_types_donnees(df.copy(), metadatas.tables[table_db])
-        print(f"[{table_db}] tentative d'insertion de {len(df2)} lignes...")
+        print(f"[{table_db}] insertion de {len(df2)} lignes...")
 
         try:
             with moteur.connect() as conn:
