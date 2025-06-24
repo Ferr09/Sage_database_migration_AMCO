@@ -135,6 +135,7 @@ def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
     csv_path = None
     if db_type == 'mysql':
         csv_path = f"{nom_staging}.csv"
+        # On écrit le fichier CSV dans le répertoire courant
         df_clean.to_csv(csv_path, index=False, header=False)
 
     try:
@@ -145,11 +146,26 @@ def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
             if db_type == 'mysql':
                 conn.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
                 conn.execute(text(f"ALTER TABLE {full_stg} DISABLE KEYS;"))
-                sql_load = f"LOAD DATA LOCAL INFILE '{os.path.abspath(csv_path)}' INTO TABLE {full_stg} FIELDS TERMINATED BY ',' ENCLOSED BY '\"' LINES TERMINATED BY '\\n';"
+
+                # --- CORRECTION APPLIQUÉE ICI ---
+                # 1. Obtenir le chemin absolu du fichier CSV.
+                chemin_absolu = os.path.abspath(csv_path)
+                # 2. Remplacer les anti-slashes (\) par des slashes (/) pour la compatibilité SQL.
+                chemin_sql_safe = chemin_absolu.replace('\\', '/')
+                
+                sql_load = f"""
+                    LOAD DATA LOCAL INFILE '{chemin_sql_safe}' 
+                    INTO TABLE {full_stg} 
+                    FIELDS TERMINATED BY ',' 
+                    ENCLOSED BY '\"' 
+                    LINES TERMINATED BY '\\n';
+                """
+                # --- FIN DE LA CORRECTION ---
+
                 conn.execute(text(sql_load))
                 conn.execute(text(f"ALTER TABLE {full_stg} ENABLE KEYS;"))
                 conn.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
-            else:
+            else: # Pour PostgreSQL
                 df_clean.to_sql(name=nom_staging, con=conn, schema=schema, if_exists="append", index=False, chunksize=10000, method="multi")
 
             result = conn.execute(text(sql_transfer))
@@ -160,8 +176,9 @@ def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
         print(f"  -> ERREUR critique pendant le staging : {e}")
         raise
     finally:
-        if csv_path and os.path.exists(csv_path): os.remove(csv_path)
-
+        # On supprime le fichier CSV temporaire après usage
+        if csv_path and os.path.exists(csv_path):
+            os.remove(csv_path)
 
 def inserer_donnees(moteur, tables, metadatas, db_type, schema=None):
     """Orchestre l'insertion des données dans la base de données."""
