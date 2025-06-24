@@ -10,12 +10,18 @@ le processus de chargement et de garantir l'intégrité référentielle en ne
 chargeant que les lignes valides.
 """
 
+import os
 import pandas as pd
+import MySQLdb
 import json
 from pathlib import Path
-from sqlalchemy import text, create_engine, Numeric, Integer, TIMESTAMP, MetaData, Table, Column
 import importlib.util
 import argparse
+from sqlalchemy import (
+    text, create_engine, Numeric, Integer, TIMESTAMP,
+    MetaData, Table, Column
+)
+from sqlalchemy.exc import SQLAlchemyError
 
 # Importations depuis les modules locaux
 from src.models.tables import metadata_ventes, metadata_achats
@@ -24,12 +30,12 @@ from src.outils.chemins import dossier_config, dossier_xlsx_propres
 
 def detect_driver():
     """Détecte le driver de base de données SQL disponible."""
-    if importlib.util.find_spec("psycopg2"):
+    if importlib.util.find_spec("MySQLdb"):
+        return "mysql+mysqldb"
+    elif importlib.util.find_spec("psycopg2"):
         return "postgresql+psycopg2"
-    elif importlib.util.find_spec("mysql.connector"):
-        return "mysql+mysqlconnector"
     else:
-        raise ImportError("Aucun driver compatible (psycopg2 ou mysql-connector) trouvé.")
+        raise ImportError("Aucun driver compatible (MySQLdb ou psycopg2) trouvé.")
 
 
 def charger_fichiers_excel(dossier, fichiers):
@@ -64,109 +70,111 @@ def forcer_types_donnees(df, table_meta):
     return df.where(pd.notna(df), None)
 
 
-def gerer_docligne_staging(moteur, df, metadatas, schema=None, db_type='postgresql'):
+def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None, mysql_opts=None):
     """
-    Gère le chargement de la table DOCLIGNE en utilisant une table de staging.
+    Gère le chargement de DOCLIGNE via staging.
+    Pour MySQL : utilise CSV + LOAD DATA LOCAL INFILE + optimisation InnoDB.
+    Pour PostgreSQL : utilise to_sql(replace)+INSERT…SELECT classique.
     """
-    nom_table_staging = "DOCLIGNE_STAGING"
-    nom_table_finale = "DOCLIGNE"
-    
-    table_finale_meta = metadatas.tables[nom_table_finale]
-    
-    print(f"[{nom_table_finale}] Utilisation de la méthode de staging...")
-    
-    meta_staging = MetaData()
-    colonnes_staging = [Column(c.name, c.type) for c in table_finale_meta.columns]
-    table_staging = Table(nom_table_staging, meta_staging, *colonnes_staging, schema=schema)
-    
-    # --- 1. Préparer et créer la table de staging ---
-    # CORRECCIÓN: Usar un bloque de transacción explícito para las operaciones DDL.
-    try:
-        with moteur.connect() as conn:
-            with conn.begin(): # Inicia la transacción (commit/rollback automático)
-                conn.execute(text(f"DROP TABLE IF EXISTS {table_staging.fullname} CASCADE;"))
-                table_staging.create(conn)
-        print(f"  -> Table de staging '{table_staging.fullname}' créée.")
-    except Exception as e:
-        print(f"  -> ERREUR lors de la création de la table de staging : {e}")
-        return
+    nom_staging = "DOCLIGNE_STAGING"
+    nom_final   = "DOCLIGNE"
+    table_meta  = metadatas.tables[nom_final]
 
-    # --- 2. Charger les données brutes dans la table de staging ---
-    df_propre = forcer_types_donnees(df.copy(), table_finale_meta)
-    
+    # Quoting uniforme
+    if db_type == 'mysql':
+        wrap = lambda t: f"`{t}`"
+    else:
+        wrap = lambda t: f'"{schema}"."{t}"' if schema else f'"{t}"'
+
+    full_stg = wrap(nom_staging)
+    tbl_final = wrap(nom_final)
+    tbl_art   = wrap("ARTICLES")
+    tbl_comp  = wrap("COMPTET")
+    cols      = [c.name for c in table_meta.columns]
+    cols_fmt  = ", ".join(wrap(c) for c in cols)
+    ar_ref    = wrap('AR_Ref')
+    ct_num    = wrap('CT_Num')
+
+    sql_transfer = f"""
+        INSERT INTO {tbl_final} ({cols_fmt})
+        SELECT s.* FROM {full_stg} AS s
+          INNER JOIN {tbl_art} a ON s.{ar_ref}=a.{ar_ref}
+          INNER JOIN {tbl_comp} c ON s.{ct_num}=c.{ct_num};
+    """
+
+    # Pré-export CSV si MySQL
+    if db_type == 'mysql':
+        df_clean = forcer_types_donnees(df.copy(), table_meta)
+        csv_path = f"{nom_staging}.csv"
+        df_clean.to_csv(csv_path, index=False)
+
     try:
-        # CORRECCIÓN: Aunque to_sql puede funcionar sin transacción explícita, es mejor práctica incluirla.
-        with moteur.connect() as conn:
-            with conn.begin(): # La transacción asegura que toda la carga sea atómica.
-                df_propre.to_sql(
-                    name=nom_table_staging,
+        # ETAPE A: DROP/CREATE staging isolé
+        with moteur.begin() as conn:
+            conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
+            meta = MetaData()
+            cols_def = [Column(c.name, c.type) for c in table_meta.columns]
+            Table(nom_staging, meta, *cols_def, schema=schema).create(conn)
+
+        # ETAPE B: Bulk load et insert
+        with moteur.begin() as conn:
+            if db_type == 'mysql':
+                # Appliquer optimisations InnoDB
+                if mysql_opts:
+                    for var, val in mysql_opts.items():
+                        conn.execute(text(f"SET SESSION {var} = {val};"))
+                # Désactiver FK et index
+                conn.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
+                conn.execute(text(f"ALTER TABLE {full_stg} DISABLE KEYS;"))
+                # LOAD DATA
+                sql_load = f"""
+                    LOAD DATA LOCAL INFILE '{os.path.abspath(csv_path)}'
+                    INTO TABLE {full_stg}
+                    FIELDS TERMINATED BY ','
+                    ENCLOSED BY '"'
+                    LINES TERMINATED BY '\\n'
+                    IGNORE 1 LINES;
+                """
+                conn.execute(text(sql_load))
+                # Réactiver FK et index
+                conn.execute(text(f"ALTER TABLE {full_stg} ENABLE KEYS;"))
+                conn.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
+            else:
+                # Variante PostgreSQL
+                df_clean = forcer_types_donnees(df.copy(), table_meta)
+                conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
+                df_clean.to_sql(
+                    name=nom_staging,
                     con=conn,
-                    if_exists="append",
-                    index=False,
                     schema=schema,
+                    if_exists="replace",
+                    index=False,
                     chunksize=10000,
-                    method='multi'
+                    method="multi"
                 )
-        print(f"  -> {len(df_propre)} lignes chargées dans la table de staging.")
-    except Exception as e:
-        print(f"  -> ERREUR critique lors du chargement dans la table de staging : {e}")
-        return
 
-    # --- 3. Transférer les données valides de staging à la table finale ---
-    colonnes_str = ", ".join([f'`{c.name}`' if db_type == 'mysql' else f'"{c.name}"' for c in table_finale_meta.columns])
-    
-    if db_type == 'postgresql':
-        tbl_staging = f'"{schema}"."{nom_table_staging}"'
-        tbl_finale = f'"{schema}"."{nom_table_finale}"'
-        tbl_articles = f'"{schema}"."ARTICLES"'
-        tbl_comptet = f'"{schema}"."COMPTET"'
-        # Nombres de columnas con comillas dobles para Postgres
-        col_ar_ref = '"AR_Ref"'
-        col_ct_num = '"CT_Num"'
-    else: # mysql
-        tbl_staging = f"`{nom_table_staging}`"
-        tbl_finale = f"`{nom_table_finale}`"
-        tbl_articles = "`ARTICLES`"
-        tbl_comptet = "`COMPTET`"
-        # Nombres de columnas con acentos graves para MySQL
-        col_ar_ref = '`AR_Ref`'
-        col_ct_num = '`CT_Num`'
+            # Transfert vers finale
+            result = conn.execute(text(sql_transfer))
+            ins = result.rowcount or 0
+            total = len(df_clean)
+            rej = total - ins
+            print(f"  -> Insérées : {ins}, Rejetées : {rej}")
 
-    sql_transfert = f"""
-        INSERT INTO {tbl_finale} ({colonnes_str})
-        SELECT s.*
-        FROM {tbl_staging} s
-        INNER JOIN {tbl_articles} a ON s.{col_ar_ref} = a.{col_ar_ref}
-        INNER JOIN {tbl_comptet} c ON s.{col_ct_num} = c.{col_ct_num};
+            # DROP staging
+            conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
+
+        print("  -> gerer_docligne_staging terminé avec succès.")
+    except SQLAlchemyError as e:
+        print(f"  -> ERREUR critique dans le staging : {e}")
+    finally:
+        if db_type == 'mysql' and os.path.exists(csv_path):
+            os.remove(csv_path)
+
+
+def inserer_donnees(moteur, tables, metadatas, db_type, schema=None):
     """
-    
-    with moteur.connect() as conn:
-        try:
-            total_staging = conn.execute(text(f"SELECT COUNT(*) FROM {tbl_staging}")).scalar()
-            
-            with conn.begin() as tx:
-                result = conn.execute(text(sql_transfert))
-            
-            lignes_inserees = result.rowcount
-            lignes_rejetees = total_staging - lignes_inserees
-            
-            print(f"  -> Transfert terminé.")
-            print(f"    - Lignes valides insérées dans '{nom_table_finale}': {lignes_inserees}")
-            print(f"    - Lignes rejetées (références inexistantes): {lignes_rejetees}")
-
-        except Exception as e:
-            print(f"  -> ERREUR lors du transfert de staging vers la table finale : {e}")
-        finally:
-            # --- 4. Nettoyage : supprimer la table de staging ---
-            with conn.begin():
-                conn.execute(text(f"DROP TABLE IF EXISTS {tbl_staging} CASCADE;"))
-            print(f"  -> Table de staging '{tbl_staging}' supprimée.")
-
-
-def inserer_donnees(moteur, tables, metadatas, schema=None, db_type='postgresql'):
-    """
-    Orchestre l'insertion des données. Utilise une méthode de staging pour DOCLIGNE
-    et une méthode directe pour les autres tables.
+    Orchestre l'insertion des données.
+    Utilise gerer_docligne_staging optimisé pour DOCLIGNE et batch inserts pour les autres.
     """
     print(f"\n--- INSERTION DANS {'SCHÉMA ' + schema if schema else 'BDD'} ---")
     if not tables:
@@ -178,31 +186,60 @@ def inserer_donnees(moteur, tables, metadatas, schema=None, db_type='postgresql'
         "fournisseur": "ARTFOURNISS", "docligne": "DOCLIGNE"
     }
     ordre = ["famille", "articles", "comptet", "fournisseur", "docligne"]
-    cles = sorted(tables.keys(), key=lambda k: next((ordre.index(b) for b in ordre if b in k), 999))
+    cles = sorted(
+        tables.keys(),
+        key=lambda k: next((ordre.index(b) for b in ordre if b in k), 999)
+    )
+
+    # Préparer options InnoDB pour MySQL
+    mysql_opts = None
+    if db_type == 'mysql':
+        mysql_opts = {
+            "innodb_flush_log_at_trx_commit": 2,
+            "innodb_log_buffer_size": 67108864,
+            "innodb_flush_method": "'O_DIRECT'"
+        }
 
     for cle in cles:
         table_db = mapping.get(next((b for b in ordre if b in cle), None))
-        if not table_db: continue
-        
+        if not table_db:
+            continue
+
         df = tables[cle]
         if df.empty:
             print(f"[{table_db}] DataFrame vide, ignoré.")
             continue
 
-        cols_meta = set(metadatas.tables[table_db].columns.keys())
+        cols_meta    = set(metadatas.tables[table_db].columns.keys())
         cols_comunes = [c for c in df.columns if c in cols_meta]
-        df_filtre = df[cols_comunes]
+        df_filtre    = df[cols_comunes]
 
         if table_db == "DOCLIGNE":
-            gerer_docligne_staging(moteur, df_filtre, metadatas, schema, db_type)
+            gerer_docligne_staging(
+                moteur,
+                df_filtre,
+                metadatas,
+                db_type,
+                schema=schema,
+                mysql_opts=mysql_opts
+            )
         else:
             print(f"[{table_db}] Insertion directe de {len(df_filtre)} lignes...")
-            df2 = forcer_types_donnees(df_filtre.copy(), metadatas.tables[table_db])
+            # Appliquer option InnoDB flush pour batch inserts si MySQL
             try:
-                with moteur.connect() as conn:
-                    with conn.begin():
-                        df2.to_sql(name=table_db, con=conn, if_exists="append", index=False,
-                                   schema=schema, chunksize=1000, method='multi')
+                with moteur.begin() as conn:
+                    if db_type == 'mysql':
+                        conn.execute(text("SET SESSION innodb_flush_log_at_trx_commit = 2;"))
+                    df2 = forcer_types_donnees(df_filtre.copy(), metadatas.tables[table_db])
+                    df2.to_sql(
+                        name=table_db,
+                        con=conn,
+                        if_exists="append",
+                        index=False,
+                        schema=schema,
+                        chunksize=5000,
+                        method='multi'
+                    )
                 print(f"  -> Succès de l'insertion dans {table_db}")
             except Exception as err:
                 msg = err.orig.args[1] if hasattr(err, 'orig') else str(err)
@@ -213,7 +250,8 @@ def inserer_donnees(moteur, tables, metadatas, schema=None, db_type='postgresql'
 # ==============================================================================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Script de chargement de données Ventes/Achats vers une BDD.")
-    parser.add_argument("--db-type", choices=["postgresql", "mysql"], required=True, help="Spécifie le type de base de données cible.")
+    parser.add_argument("--db-type", choices=["postgresql", "mysql"], required=True,
+                        help="Spécifie le type de base de données cible.")
     args = parser.parse_args()
     db_type = args.db_type
 
@@ -223,26 +261,33 @@ if __name__ == "__main__":
     config = json.load(open(cfg, "r", encoding="utf-8"))
 
     driver = detect_driver()
-    base = f"{driver}://{config['db_user']}:{config['db_password']}@{config['db_host']}:{config['db_port']}/"
+    base   = f"{driver}://{config['db_user']}:{config['db_password']}@{config['db_host']}:{config['db_port']}/"
     connect_args = {}
-    if db_type == "mysql":
-        ssl = "?ssl_disabled=True"
-    else:
-        ssl = ""
+    ssl = "?ssl_disabled=True" if db_type == "mysql" else ""
 
     if db_type == "postgresql":
         moteur = create_engine(base + config['db_name'] + ssl, connect_args=connect_args)
-        mv, ma = moteur, moteur
+        mv = ma = moteur
     else:
-        auto = create_engine(base + ssl, isolation_level="AUTOCOMMIT", connect_args=connect_args)
+        # Charger paramètre max_allowed_packet
+        auto = create_engine(base + ssl,
+                             connect_args={'local_infile': 1},
+                             isolation_level="AUTOCOMMIT")
         print("● Ajustement de 'max_allowed_packet' pour MySQL...")
         with auto.connect() as c:
             c.execute(text("SET GLOBAL max_allowed_packet = 134217728"))
         auto.dispose()
+
         print("● Création des moteurs de connexion MySQL...")
-        moteur = create_engine(base + ssl, connect_args=connect_args)
-        mv = create_engine(base + "Ventes" + ssl, isolation_level="AUTOCOMMIT", connect_args=connect_args)
-        ma = create_engine(base + "Achats" + ssl, isolation_level="AUTOCOMMIT", connect_args=connect_args)
+        moteur = create_engine(base + ssl,
+                               connect_args={'local_infile': 1},
+                               isolation_level="AUTOCOMMIT")
+        mv = create_engine(base + "Ventes" + ssl,
+                            connect_args={'local_infile': 1},
+                            isolation_level="AUTOCOMMIT")
+        ma = create_engine(base + "Achats" + ssl,
+                            connect_args={'local_infile': 1},
+                            isolation_level="AUTOCOMMIT")
 
     print(f"Réinitialisation de la structure pour {db_type.upper()}...")
     with moteur.connect() as conn:
@@ -268,23 +313,27 @@ if __name__ == "__main__":
     print("Tables créées avec succès.")
 
     files_v = {
-        "famille_ventes": "F_FAMILLE_propre.xlsx", "articles_ventes": "F_ARTICLE_propre.xlsx",
-        "comptet_ventes": "F_COMPTET_propre.xlsx", "docligne_ventes": "F_DOCLIGNE_propre.xlsx"
+        "famille_ventes":    "F_FAMILLE_propre.xlsx",
+        "articles_ventes":   "F_ARTICLE_propre.xlsx",
+        "comptet_ventes":    "F_COMPTET_propre.xlsx",
+        "docligne_ventes":   "F_DOCLIGNE_propre.xlsx"
     }
     files_a = {
-        "famille_achats": "F_FAMILLE_propre.xlsx", "articles_achats": "F_ARTICLE_propre.xlsx",
-        "comptet_achats": "F_COMPTET_propre.xlsx", "fournisseur_achats": "F_ARTFOURNISS_propre.xlsx",
-        "docligne_achats": "F_DOCLIGNE_propre.xlsx"
+        "famille_achats":    "F_FAMILLE_propre.xlsx",
+        "articles_achats":   "F_ARTICLE_propre.xlsx",
+        "comptet_achats":    "F_COMPTET_propre.xlsx",
+        "fournisseur_achats":"F_ARTFOURNISS_propre.xlsx",
+        "docligne_achats":   "F_DOCLIGNE_propre.xlsx"
     }
     tv = charger_fichiers_excel(dossier_xlsx_propres, files_v)
     ta = charger_fichiers_excel(dossier_xlsx_propres, files_a)
 
     if db_type == "postgresql":
-        inserer_donnees(moteur, tv, metadata_ventes, schema="Ventes", db_type=db_type)
-        inserer_donnees(moteur, ta, metadata_achats, schema="Achats", db_type=db_type)
+        inserer_donnees(moteur, tv, metadata_ventes, db_type, schema="Ventes")
+        inserer_donnees(moteur, ta, metadata_achats, db_type, schema="Achats")
     else:
-        inserer_donnees(mv, tv, metadata_ventes, db_type=db_type)
-        inserer_donnees(ma, ta, metadata_achats, db_type=db_type)
+        inserer_donnees(mv, tv, metadata_ventes, db_type)
+        inserer_donnees(ma, ta, metadata_achats, db_type)
 
     moteur.dispose()
     if db_type == "mysql":
