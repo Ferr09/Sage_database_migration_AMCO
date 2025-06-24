@@ -1,7 +1,9 @@
 # Version compatible avec MySQL 5.6 et Windows 7
 
-mysql-connector-python==8.0.33 # pour la connexion à MySQL
-sqlalchemy==1.4.49 # pour l'interaction avec la base de données
-pandas==1.3.5     # pour la manipulation des données tabulaires
-openpyxl==3.0.10 # pour lire les fichiers Excel (.xlsx)
+# -*- coding: utf-8 -*-
+# Fichier requirements.txt
+mysqlclient==2.1.1          # Driver natif plus performant
+SQLAlchemy==1.4.49          # ORM et interaction avec la base
+pandas==1.3.5               # Manipulation des données
+openpyxl==3.0.10            # Lecture des fichiers Excel
 
