@@ -130,7 +130,7 @@ def forcer_types_donnees(df, table_meta):
             except Exception:
                 pass
     return df.where(pd.notna(df), None)
-r
+
 
 def gerer_docligne_staging_debug(moteur, df, metadatas, db_type, schema=None):
     """
@@ -205,32 +205,40 @@ def gerer_docligne_staging_debug(moteur, df, metadatas, db_type, schema=None):
             rows = conn.execute(text(f"SELECT DL_NO FROM {full_stg} ORDER BY DL_NO LIMIT 10;")).fetchall()
             print("Exemple DL_NO en staging :", [r[0] for r in rows])
 
-    # 8) Transfert vers finale et diagnostic
-    tbl_fin     = lambda t: f"`{t}`"(nom_final)
-    insert_cols = ", ".join(f"`{c}`" for c in colonnes)
-    select_cols = ", ".join(f"s.`{c}`" for c in colonnes)
-    ar_ref, ct_num = "`AR_Ref`", "`CT_Num`"
+    # Définition du quoting avant l’étape 8
+    if db_type == 'mysql':
+        wrap = lambda t: f"`{t}`"
+    else:
+        wrap = lambda t: f'"{schema}"."{t}"' if schema else f'"{t}"'
 
+    full_stg    = wrap(nom_staging)
+    tbl_fin     = wrap(nom_final)
+    tbl_art     = wrap("ARTICLES")
+    tbl_comp    = wrap("COMPTET")
+    insert_cols = ", ".join(wrap(c) for c in colonnes)
+    select_cols = ", ".join(f"s.{wrap(c)}" for c in colonnes)
+    ar_ref, ct_num = wrap("AR_Ref"), wrap("CT_Num")
+
+    # 8) Transfert vers finale et diagnostic
     if schema and schema.lower() == "achats":
         # Pour le schéma Achats, on ajoute le JOIN sur ARTFOURNISS
         sql_transfert = f"""
-            INSERT INTO {tbl_fin(nom_final)} ({insert_cols})
+            INSERT INTO {tbl_fin} ({insert_cols})
             SELECT {select_cols}
               FROM {full_stg} AS s
-              JOIN `ARTICLES`    a ON s.{ar_ref}=a.{ar_ref}
-              JOIN `COMPTET`     c ON s.{ct_num}=c.{ct_num}
+              JOIN {tbl_art}    a ON s.{ar_ref}=a.{ar_ref}
+              JOIN {tbl_comp}   c ON s.{ct_num}=c.{ct_num}
               JOIN `ARTFOURNISS` f ON s.`AF_REFFOURNISS`=f.`AF_REFFOURNISS`;
         """
     else:
         # Cas Ventes (ou générique) : seulement ARTICLES + COMPTET
         sql_transfert = f"""
-            INSERT INTO {tbl_fin(nom_final)} ({insert_cols})
+            INSERT INTO {tbl_fin} ({insert_cols})
             SELECT {select_cols}
               FROM {full_stg} AS s
-              JOIN `ARTICLES` a ON s.{ar_ref}=a.{ar_ref}
-              JOIN `COMPTET`  c ON s.{ct_num}=c.{ct_num};
+              JOIN {tbl_art} a ON s.{ar_ref}=a.{ar_ref}
+              JOIN {tbl_comp} c ON s.{ct_num}=c.{ct_num};
         """
-
 
     with moteur.begin() as conn:
         try:
@@ -239,15 +247,14 @@ def gerer_docligne_staging_debug(moteur, df, metadatas, db_type, schema=None):
         except Exception as e:
             print("ERREUR INSERT:", e)
 
-        # Après insertion, liste DL_NO restants en staging
         reste = conn.execute(text(f"SELECT DL_NO FROM {full_stg} LIMIT 10;")).fetchall()
         print("DL_NO restants en staging :", [r[0] for r in reste])
 
-        # Nettoyage
         conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
         print("Table staging supprimée.")
 
     print("DEBUG gerer_docligne_staging terminé.")
+
 
 def inserer_donnees(moteur, tables, metadatas, db_type, schema=None):
     """
