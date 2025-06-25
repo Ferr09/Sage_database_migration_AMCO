@@ -153,13 +153,16 @@ def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
     tbl_art  = wrap("ARTICLES")
     tbl_comp = wrap("COMPTET")
 
+    ar_ref   = wrap("AR_REF")
+    ct_num   = wrap("CT_NUM")
+
     colonnes = [c.name for c in table_meta.columns]
-    cols_fmt = ", ".join(wrap(c) for c in colonnes)
-    ar_ref   = wrap("AR_Ref")
-    ct_num   = wrap("CT_Num")
+    # Avant : cols_fmt = ", ".join(wrap(c) for c in colonnes)
+    # Après : on force le préfixe 's.' pour lever l'ambiguïté
+    cols_fmt = ", ".join(f"s.{wrap(c)}" for c in colonnes)
 
     sql_transfer = f"""
-        INSERT INTO {tbl_fin} ({cols_fmt})
+        INSERT INTO {tbl_fin} ({', '.join(wrap(c) for c in colonnes)})
         SELECT {cols_fmt}
           FROM {full_stg} AS s
           INNER JOIN {tbl_art} AS a ON s.{ar_ref}=a.{ar_ref}
