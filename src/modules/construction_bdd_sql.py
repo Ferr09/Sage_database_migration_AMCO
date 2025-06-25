@@ -181,39 +181,61 @@ def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
             os.remove(csv_path)
 
 def inserer_donnees(moteur, tables, metadatas, db_type, schema=None):
-    """Orchestre l'insertion des données dans la base de données."""
+    """
+    Orchestre l'insertion des données.
+    Désactive temporairement les contraintes de clés étrangères pour MySQL pour une insertion en masse.
+    """
     print(f"\n--- INSERTION DANS {'le schéma ' + schema if schema else 'la BDD'} ---")
     if not tables:
         print("Aucun DataFrame à insérer.")
         return
 
-    mapping = {"famille": "FAMILLE", "articles": "ARTICLES", "comptet": "COMPTET", "fournisseur": "ARTFOURNISS", "docligne": "DOCLIGNE"}
-    ordre = ["famille", "articles", "comptet", "fournisseur", "docligne"]
-    cles = sorted(tables.keys(), key=lambda k: next((ordre.index(b) for b in ordre if b in k), 999))
+    connexion_principale = moteur.connect()
+    
+    try:
+        if db_type == 'mysql':
+            # --- MODIFICATION : Désactiver les contraintes de clés étrangères ---
+            print("● [Optimisation] Désactivation des contraintes de clés étrangères...")
+            connexion_principale.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
 
-    for cle in cles:
-        table_db = mapping.get(next((b for b in ordre if b in cle), None))
-        if not table_db: continue
-        df = tables[cle]
-        if df.empty:
-            print(f"[{table_db}] DataFrame vide, ignoré.")
-            continue
-        cols_communes = [c for c in df.columns if c in metadatas.tables[table_db].columns.keys()]
-        df_filtre = df[cols_communes]
+        mapping = {"famille": "FAMILLE", "articles": "ARTICLES", "comptet": "COMPTET", "fournisseur": "ARTFOURNISS", "docligne": "DOCLIGNE"}
+        ordre = ["famille", "articles", "comptet", "fournisseur", "docligne"]
+        cles = sorted(tables.keys(), key=lambda k: next((ordre.index(b) for b in ordre if b in k), 999))
 
-        if table_db == "DOCLIGNE":
-            gerer_docligne_staging(moteur, df_filtre, metadatas, db_type, schema=schema)
-        else:
-            print(f"[{table_db}] Insertion directe de {len(df_filtre)} lignes...")
-            try:
-                with moteur.begin() as conn:
+        for cle in cles:
+            table_db = mapping.get(next((b for b in ordre if b in cle), None))
+            if not table_db: continue
+            df = tables[cle]
+            if df.empty:
+                print(f"[{table_db}] DataFrame vide, ignoré.")
+                continue
+            cols_communes = [c for c in df.columns if c in metadatas.tables[table_db].columns.keys()]
+            df_filtre = df[cols_communes]
+
+            if table_db == "DOCLIGNE":
+                # La méthode de staging pour DOCLIGNE est déjà robuste grâce au INNER JOIN.
+                gerer_docligne_staging(moteur, df_filtre, metadatas, db_type, schema=schema)
+            else:
+                print(f"[{table_db}] Insertion directe de {len(df_filtre)} lignes...")
+                try:
+                    # On utilise la connexion principale qui a les FK désactivées
                     df2 = forcer_types_donnees(df_filtre.copy(), metadatas.tables[table_db])
-                    df2.to_sql(name=table_db, con=conn, if_exists="append", index=False, schema=schema, chunksize=5000, method='multi')
-                print(f"  -> Succès de l'insertion dans {table_db}")
-            except Exception as err:
-                msg = err.orig.args[1] if hasattr(err, 'orig') else str(err)
-                print(f"  -> ERREUR lors de l'insertion dans {table_db} : {msg}")
+                    df2.to_sql(name=table_db, con=connexion_principale, if_exists="append", index=False, schema=schema, chunksize=5000, method='multi')
+                    print(f"  -> Succès de l'insertion dans {table_db}")
+                except Exception as err:
+                    msg = err.orig.args[1] if hasattr(err, 'orig') else str(err)
+                    print(f"  -> ERREUR lors de l'insertion dans {table_db} : {msg}")
+                    # On pourrait choisir d'arrêter tout le script ici si une table échoue
+                    # raise
 
+    finally:
+        # --- MODIFICATION : Le bloc 'finally' garantit que les contraintes sont toujours réactivées ---
+        if db_type == 'mysql':
+            print("[Optimisation] Réactivation des contraintes de clés étrangères...")
+            connexion_principale.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
+        
+        # On ferme la connexion manuelle
+        connexion_principale.close()
 
 # ==============================================================================
 # --- POINT D'ENTRÉE DU SCRIPT ---
