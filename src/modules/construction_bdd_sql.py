@@ -127,7 +127,7 @@ def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
     full_stg = wrap(nom_staging)
     tbl_final, tbl_art, tbl_comp = wrap(nom_final), wrap("ARTICLES"), wrap("COMPTET")
     cols_fmt = ", ".join(wrap(c.name) for c in table_meta.columns)
-    ar_ref, ct_num = wrap('AR_Ref'), wrap('CT_Num')
+    ar_ref, ct_num = wrap('AR_REF'), wrap('CT_NUM')
 
     sql_transfer = f"INSERT INTO {tbl_final} ({cols_fmt}) SELECT s.* FROM {full_stg} s JOIN {tbl_art} a ON s.{ar_ref}=a.{ar_ref} JOIN {tbl_comp} c ON s.{ct_num}=c.{ct_num};"
 
