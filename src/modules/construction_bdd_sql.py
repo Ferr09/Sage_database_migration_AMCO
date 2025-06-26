@@ -131,26 +131,32 @@ def forcer_types_donnees(df, table_meta):
                 pass
     return df.where(pd.notna(df), None)
 
+
 def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
     """
-    Gère le chargement de DOCLIGNE avec une syntaxe LOAD DATA simplifiée et
-    robuste, spécialement pour MySQL 5.6.
+    Gère le chargement de DOCLIGNE en utilisant directement le fichier CSV d'origine
+    pour garantir une intégrité maximale des données via LOAD DATA INFILE.
+    Le DataFrame 'df' n'est plus utilisé pour la charge, seulement pour obtenir le compte de lignes.
     """
     nom_staging = "DOCLIGNE_STAGING"
     nom_final   = "DOCLIGNE"
     table_meta  = metadatas.tables[nom_final]
 
+    # Définir le chemin vers le fichier CSV original
     chemin_csv_original = dossier_csv_extraits / "F_DOCLIGNE.csv"
 
     if not chemin_csv_original.exists():
         print(f"  -> ERREUR CRITIQUE: Le fichier CSV d'origine est introuvable : {chemin_csv_original}")
         raise FileNotFoundError(f"Le fichier source {chemin_csv_original} est requis pour le staging.")
 
-    if db_type != 'mysql':
-        print("  -> AVERTISSEMENT: Cette méthode de chargement est optimisée pour MySQL et sera ignorée.")
-        return
+    if db_type == 'mysql':
+        wrap = lambda t: f"`{t}`"
+    else: # PostgreSQL
+        # Cette méthode n'est pas recommandée pour PostgreSQL, qui préfère la méthode COPY
+        # Pour l'instant, on se concentre sur la solution MySQL
+        print("  -> AVERTISSEMENT: La méthode de chargement direct depuis CSV est optimisée pour MySQL.")
+        return # Ou implémenter une logique avec COPY FROM
 
-    wrap = lambda t: f"`{t}`"
     full_stg = wrap(nom_staging)
     tbl_final, tbl_art, tbl_comp = wrap(nom_final), wrap("ARTICLES"), wrap("COMPTET")
     cols_fmt = ", ".join(wrap(c.name) for c in table_meta.columns)
@@ -166,48 +172,30 @@ def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
 
             print(f"  -> Chargement direct du fichier '{chemin_csv_original.name}' dans la table de staging...")
             
-            chemin_sql_safe = Path(chemin_csv_original).resolve().as_posix()
+            # Préparation de la commande LOAD DATA
+            chemin_absolu = os.path.abspath(chemin_csv_original)
+            chemin_sql_safe = chemin_absolu.replace('\\', '/')
             
-            # --- SIMPLIFICATION POUR COMPATIBILITÉ AVEC MYSQL 5.6 ---
-            # 1. On utilise 'utf8' au lieu de 'utf8mb4'. C'est beaucoup plus sûr pour les anciennes versions.
-            # 2. On sépare les tentatives de manière plus claire.
-            
-            # Tentative 1 : Le cas le plus courant (fichiers Linux/Mac ou normalisés)
-            sql_load_base = f"""
-                LOAD DATA LOCAL INFILE '{chemin_sql_safe}'
-                INTO TABLE {full_stg}
-                CHARACTER SET utf8
-                FIELDS TERMINATED BY ','
-                ENCLOSED BY '"'
-                LINES TERMINATED BY '\\n'
-                IGNORE 1 LINES;
-            """
-            
-            # Tentative 2 : Le cas pour les fichiers générés sous Windows
-            sql_load_windows = f"""
-                LOAD DATA LOCAL INFILE '{chemin_sql_safe}'
-                INTO TABLE {full_stg}
-                CHARACTER SET utf8
-                FIELDS TERMINATED BY ','
-                ENCLOSED BY '"'
-                LINES TERMINATED BY '\\r\\n'
+            # La commande LOAD DATA est ajustée pour ignorer la première ligne (la cabecera)
+            sql_load = f"""
+                LOAD DATA LOCAL INFILE '{chemin_sql_safe}' 
+                INTO TABLE {full_stg} 
+                CHARACTER SET utf8mb4
+                FIELDS TERMINATED BY ',' 
+                ENCLOSED BY '"' 
+                LINES TERMINATED BY '\\r\\n' -- Important: Windows utilise \r\n, Linux/Mac utilise \n
                 IGNORE 1 LINES;
             """
             
             try:
-                print("  -> Tentative de chargement avec terminateur de ligne '\\n' (standard)...")
-                conn.execute(text(sql_load_base))
-            except Exception as e:
-                print(f"  -> Échec. Tentative avec terminateur de ligne '\\r\\n' (Windows)...")
-                # Si la première tentative échoue, on essaie la version pour Windows
-                try:
-                    conn.execute(text(sql_load_windows))
-                except Exception as final_e:
-                    print("  -> ERREUR: Les deux tentatives de chargement ont échoué.")
-                    print(f"  -> La dernière erreur de syntaxe (1064) est probablement due au format du fichier CSV lui-même.")
-                    print(f"  -> Erreur d'origine : {final_e}")
-                    raise final_e
-
+                conn.execute(text(sql_load))
+            except Exception:
+                # Si la première tentative échoue, on essaie avec un autre terminateur de ligne
+                print("  -> Le chargement a échoué, tentative avec un autre terminateur de ligne (\\n)...")
+                sql_load_alt = sql_load.replace("LINES TERMINATED BY '\\r\\n'", "LINES TERMINATED BY '\\n'")
+                conn.execute(text(sql_load_alt))
+            
+            # Compter les lignes chargées dans la table de staging
             lignes_chargees_staging = conn.execute(text(f"SELECT COUNT(*) FROM {full_stg};")).scalar()
             print(f"  -> {lignes_chargees_staging} lignes chargées avec succès dans '{nom_staging}'.")
 
@@ -219,6 +207,7 @@ def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
     except SQLAlchemyError as e:
         print(f"  -> ERREUR critique pendant le staging : {e}")
         raise
+
 
 def inserer_donnees(moteur, tables, metadatas, db_type, schema=None):
     """
