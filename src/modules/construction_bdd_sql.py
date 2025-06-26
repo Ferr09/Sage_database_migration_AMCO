@@ -87,34 +87,13 @@ def charger_fichiers_excel(dossier, fichiers):
         if chemin.exists():
             print(f"Chargement du fichier : {fichier}")
             df = pd.read_excel(chemin, engine='openpyxl')
-            
-            # --- LOGIQUE DE CONSOLIDATION INTELLIGENTE POUR ACHATS ---
-            if "ARTFOURNISS" in fichier:
-                if 'AF_REFFOURNISS' in df.columns:
-                    df.dropna(subset=['AF_REFFOURNISS'], inplace=True) # Pré-nettoyage
-                    comptes = df['AF_REFFOURNISS'].value_counts()
-                    refs_doublons = comptes[comptes > 1].index.tolist()
-
-                    if refs_doublons:
-                        print(f"  -> Consolidation de {len(refs_doublons)} référence(s) fournisseur en double...")
-                        df_uniques = df[~df['AF_REFFOURNISS'].isin(refs_doublons)]
-                        df_a_consolider = df[df['AF_REFFOURNISS'].isin(refs_doublons)]
-                        
-                        def premier_non_nul(series):
-                            valeurs_non_nulles = series.dropna()
-                            return valeurs_non_nulles.iloc[0] if not valeurs_non_nulles.empty else None
-
-                        df_consolide = df_a_consolider.groupby('AF_REFFOURNISS', as_index=False).agg(premier_non_nul)
-                        df = pd.concat([df_uniques, df_consolide], ignore_index=True)
-                        print(f"  -> Consolidation terminée. Total de lignes final : {len(df)}")
-            # --- FIN DE LA LOGIQUE DE CONSOLIDATION ---
-
             for col in df.select_dtypes(include=["object"]).columns:
                 df[col] = df[col].astype(str).str.strip().replace('nan', None)
             tables[nom] = df
         else:
             print(f"AVERTISSEMENT : Le fichier {chemin} est introuvable, il sera ignoré.")
     return tables
+
 
 def forcer_types_donnees(df, table_meta):
     """Force la conversion des types de données d'un DataFrame pour correspondre aux métadonnées SQL."""
@@ -135,7 +114,6 @@ def forcer_types_donnees(df, table_meta):
 def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
     """
     Gère le chargement de DOCLIGNE via une table de staging.
-    Inclut une logique de diagnostic en cas de rejet massif.
     """
     nom_staging = "DOCLIGNE_STAGING"
     nom_final   = "DOCLIGNE"
@@ -152,58 +130,43 @@ def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
     ar_ref, ct_num = wrap('AR_REF'), wrap('CT_NUM')
 
     sql_transfer = f"INSERT INTO {tbl_final} ({cols_fmt}) SELECT s.* FROM {full_stg} s JOIN {tbl_art} a ON s.{ar_ref}=a.{ar_ref} JOIN {tbl_comp} c ON s.{ct_num}=c.{ct_num};"
-    
-    df_clean = forcer_types_donnees(df.copy(), table_meta)
-    
-    # --- LOGIQUE DE DIAGNOSTIC ---
-    # Avant d'essayer d'insérer, vérifions pourquoi les lignes pourraient être rejetées.
-    # Cette vérification est cruciale pour le cas "Ventes".
-    if not df_clean.empty and schema == "Ventes": # ou une autre condition pour cibler Ventes
-        try:
-            with moteur.connect() as conn:
-                articles_valides = pd.read_sql(f"SELECT DISTINCT AR_REF FROM {tbl_art}", conn)['AR_REF'].tolist()
-                clients_valides = pd.read_sql(f"SELECT DISTINCT CT_NUM FROM {tbl_comp}", conn)['CT_NUM'].tolist()
-            
-            df_clean['err_ar_ref'] = ~df_clean['AR_REF'].isin(articles_valides)
-            df_clean['err_ct_num'] = ~df_clean['CT_NUM'].isin(clients_valides)
-            
-            df_problemes = df_clean[(df_clean['err_ar_ref']) | (df_clean['err_ct_num'])]
-            
-            if not df_problemes.empty:
-                rapport_path = Path('./rapport_references_ventes_cassees.xlsx')
-                print(f"  -> DIAGNOSTIC: {len(df_problemes)} lignes de ventes ont des références cassées.")
-                print(f"  -> Génération du rapport d'erreurs : {rapport_path}")
-                df_problemes.to_excel(rapport_path, index=False)
-        except Exception as e:
-            print(f"  -> AVERTISSEMENT: Impossible de générer le rapport de diagnostic pour les ventes. Erreur: {e}")
-    # --- FIN DE LA LOGIQUE DE DIAGNOSTIC ---
 
+    df_clean = forcer_types_donnees(df.copy(), table_meta)
     csv_path = None
     if db_type == 'mysql':
         csv_path = f"{nom_staging}.csv"
-        df_clean.drop(columns=['err_ar_ref', 'err_ct_num'], errors='ignore').to_csv(csv_path, index=False, header=False)
+        # On écrit le fichier CSV dans le répertoire courant
+        df_clean.to_csv(csv_path, index=False, header=False)
 
     try:
         with moteur.begin() as conn:
             conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
             Table(nom_staging, MetaData(), *[Column(c.name, c.type) for c in table_meta.columns], schema=schema).create(conn)
             
-            # ... (le reste de la fonction reste identique)
             if db_type == 'mysql':
                 conn.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
                 conn.execute(text(f"ALTER TABLE {full_stg} DISABLE KEYS;"))
+
+                # --- CORRECTION APPLIQUÉE ICI ---
+                # 1. Obtenir le chemin absolu du fichier CSV.
                 chemin_absolu = os.path.abspath(csv_path)
+                # 2. Remplacer les anti-slashes (\) par des slashes (/) pour la compatibilité SQL.
                 chemin_sql_safe = chemin_absolu.replace('\\', '/')
+                
                 sql_load = f"""
                     LOAD DATA LOCAL INFILE '{chemin_sql_safe}' 
                     INTO TABLE {full_stg} 
-                    FIELDS TERMINATED BY ',' ENCLOSED BY '\"' LINES TERMINATED BY '\\n';
+                    FIELDS TERMINATED BY ',' 
+                    ENCLOSED BY '\"' 
+                    LINES TERMINATED BY '\\n';
                 """
+                # --- FIN DE LA CORRECTION ---
+
                 conn.execute(text(sql_load))
                 conn.execute(text(f"ALTER TABLE {full_stg} ENABLE KEYS;"))
                 conn.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
-            else:
-                df_clean.drop(columns=['err_ar_ref', 'err_ct_num'], errors='ignore').to_sql(name=nom_staging, con=conn, schema=schema, if_exists="append", index=False, chunksize=10000, method="multi")
+            else: # Pour PostgreSQL
+                df_clean.to_sql(name=nom_staging, con=conn, schema=schema, if_exists="append", index=False, chunksize=10000, method="multi")
 
             result = conn.execute(text(sql_transfer))
             ins = result.rowcount or 0
@@ -211,14 +174,12 @@ def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
             
     except SQLAlchemyError as e:
         print(f"  -> ERREUR critique pendant le staging : {e}")
-        # Pour Ventes, on ne veut pas que ça crash, mais pour Achats si.
-        if "Achats" in str(moteur.url): # Simple check pour cibler Achats
-             raise
+        raise
     finally:
+        # On supprime le fichier CSV temporaire après usage
         if csv_path and os.path.exists(csv_path):
             os.remove(csv_path)
 
-            
 def inserer_donnees(moteur, tables, metadatas, db_type, schema=None):
     """
     Orchestre l'insertion des données.
