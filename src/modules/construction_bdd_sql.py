@@ -134,28 +134,17 @@ def forcer_types_donnees(df, table_meta):
 
 def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
     """
-    Gère le chargement de DOCLIGNE en utilisant directement le fichier CSV d'origine
-    pour garantir une intégrité maximale des données via LOAD DATA INFILE.
-    Le DataFrame 'df' n'est plus utilisé pour la charge, seulement pour obtenir le compte de lignes.
+    Gère le chargement de DOCLIGNE via une table de staging.
+    Inclut une logique de diagnostic en cas de rejet massif.
     """
     nom_staging = "DOCLIGNE_STAGING"
     nom_final   = "DOCLIGNE"
     table_meta  = metadatas.tables[nom_final]
 
-    # Définir le chemin vers le fichier CSV original
-    chemin_csv_original = dossier_csv_extraits / "F_DOCLIGNE.csv"
-
-    if not chemin_csv_original.exists():
-        print(f"  -> ERREUR CRITIQUE: Le fichier CSV d'origine est introuvable : {chemin_csv_original}")
-        raise FileNotFoundError(f"Le fichier source {chemin_csv_original} est requis pour le staging.")
-
     if db_type == 'mysql':
         wrap = lambda t: f"`{t}`"
-    else: # PostgreSQL
-        # Cette méthode n'est pas recommandée pour PostgreSQL, qui préfère la méthode COPY
-        # Pour l'instant, on se concentre sur la solution MySQL
-        print("  -> AVERTISSEMENT: La méthode de chargement direct depuis CSV est optimisée pour MySQL.")
-        return # Ou implémenter une logique avec COPY FROM
+    else:
+        wrap = lambda t: f'"{schema}"."{t}"' if schema else f'"{t}"'
 
     full_stg = wrap(nom_staging)
     tbl_final, tbl_art, tbl_comp = wrap(nom_final), wrap("ARTICLES"), wrap("COMPTET")
@@ -164,51 +153,72 @@ def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
 
     sql_transfer = f"INSERT INTO {tbl_final} ({cols_fmt}) SELECT s.* FROM {full_stg} s JOIN {tbl_art} a ON s.{ar_ref}=a.{ar_ref} JOIN {tbl_comp} c ON s.{ct_num}=c.{ct_num};"
     
+    df_clean = forcer_types_donnees(df.copy(), table_meta)
+    
+    # --- LOGIQUE DE DIAGNOSTIC ---
+    # Avant d'essayer d'insérer, vérifions pourquoi les lignes pourraient être rejetées.
+    # Cette vérification est cruciale pour le cas "Ventes".
+    if not df_clean.empty and schema == "Ventes": # ou une autre condition pour cibler Ventes
+        try:
+            with moteur.connect() as conn:
+                articles_valides = pd.read_sql(f"SELECT DISTINCT AR_REF FROM {tbl_art}", conn)['AR_REF'].tolist()
+                clients_valides = pd.read_sql(f"SELECT DISTINCT CT_NUM FROM {tbl_comp}", conn)['CT_NUM'].tolist()
+            
+            df_clean['err_ar_ref'] = ~df_clean['AR_REF'].isin(articles_valides)
+            df_clean['err_ct_num'] = ~df_clean['CT_NUM'].isin(clients_valides)
+            
+            df_problemes = df_clean[(df_clean['err_ar_ref']) | (df_clean['err_ct_num'])]
+            
+            if not df_problemes.empty:
+                rapport_path = Path('./rapport_references_ventes_cassees.xlsx')
+                print(f"  -> DIAGNOSTIC: {len(df_problemes)} lignes de ventes ont des références cassées.")
+                print(f"  -> Génération du rapport d'erreurs : {rapport_path}")
+                df_problemes.to_excel(rapport_path, index=False)
+        except Exception as e:
+            print(f"  -> AVERTISSEMENT: Impossible de générer le rapport de diagnostic pour les ventes. Erreur: {e}")
+    # --- FIN DE LA LOGIQUE DE DIAGNOSTIC ---
+
+    csv_path = None
+    if db_type == 'mysql':
+        csv_path = f"{nom_staging}.csv"
+        df_clean.drop(columns=['err_ar_ref', 'err_ct_num'], errors='ignore').to_csv(csv_path, index=False, header=False)
+
     try:
         with moteur.begin() as conn:
-            print(f"  -> Création de la table de staging '{nom_staging}'...")
             conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
             Table(nom_staging, MetaData(), *[Column(c.name, c.type) for c in table_meta.columns], schema=schema).create(conn)
-
-            print(f"  -> Chargement direct du fichier '{chemin_csv_original.name}' dans la table de staging...")
             
-            # Préparation de la commande LOAD DATA
-            chemin_absolu = os.path.abspath(chemin_csv_original)
-            chemin_sql_safe = chemin_absolu.replace('\\', '/')
-            
-            # La commande LOAD DATA est ajustée pour ignorer la première ligne (la cabecera)
-            sql_load = f"""
-                LOAD DATA LOCAL INFILE '{chemin_sql_safe}' 
-                INTO TABLE {full_stg} 
-                CHARACTER SET utf8mb4
-                FIELDS TERMINATED BY ',' 
-                ENCLOSED BY '"' 
-                LINES TERMINATED BY '\\r\\n' -- Important: Windows utilise \r\n, Linux/Mac utilise \n
-                IGNORE 1 LINES;
-            """
-            
-            try:
+            # ... (le reste de la fonction reste identique)
+            if db_type == 'mysql':
+                conn.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
+                conn.execute(text(f"ALTER TABLE {full_stg} DISABLE KEYS;"))
+                chemin_absolu = os.path.abspath(csv_path)
+                chemin_sql_safe = chemin_absolu.replace('\\', '/')
+                sql_load = f"""
+                    LOAD DATA LOCAL INFILE '{chemin_sql_safe}' 
+                    INTO TABLE {full_stg} 
+                    FIELDS TERMINATED BY ',' ENCLOSED BY '\"' LINES TERMINATED BY '\\n';
+                """
                 conn.execute(text(sql_load))
-            except Exception:
-                # Si la première tentative échoue, on essaie avec un autre terminateur de ligne
-                print("  -> Le chargement a échoué, tentative avec un autre terminateur de ligne (\\n)...")
-                sql_load_alt = sql_load.replace("LINES TERMINATED BY '\\r\\n'", "LINES TERMINATED BY '\\n'")
-                conn.execute(text(sql_load_alt))
-            
-            # Compter les lignes chargées dans la table de staging
-            lignes_chargees_staging = conn.execute(text(f"SELECT COUNT(*) FROM {full_stg};")).scalar()
-            print(f"  -> {lignes_chargees_staging} lignes chargées avec succès dans '{nom_staging}'.")
+                conn.execute(text(f"ALTER TABLE {full_stg} ENABLE KEYS;"))
+                conn.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
+            else:
+                df_clean.drop(columns=['err_ar_ref', 'err_ct_num'], errors='ignore').to_sql(name=nom_staging, con=conn, schema=schema, if_exists="append", index=False, chunksize=10000, method="multi")
 
-            print(f"  -> Transfert des données de '{nom_staging}' vers '{nom_final}'...")
             result = conn.execute(text(sql_transfer))
             ins = result.rowcount or 0
-            print(f"  -> Lignes insérées : {ins}, Lignes rejetées : {lignes_chargees_staging - ins}")
-
+            print(f"  -> Lignes insérées : {ins}, Lignes rejetées : {len(df_clean) - ins}")
+            
     except SQLAlchemyError as e:
         print(f"  -> ERREUR critique pendant le staging : {e}")
-        raise
+        # Pour Ventes, on ne veut pas que ça crash, mais pour Achats si.
+        if "Achats" in str(moteur.url): # Simple check pour cibler Achats
+             raise
+    finally:
+        if csv_path and os.path.exists(csv_path):
+            os.remove(csv_path)
 
-
+            
 def inserer_donnees(moteur, tables, metadatas, db_type, schema=None):
     """
     Orchestre l'insertion des données.
