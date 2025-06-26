@@ -23,7 +23,7 @@ from contextlib import contextmanager
 # Importations depuis les modules locaux du projet
 try:
     from src.models.tables import metadata_ventes, metadata_achats
-    from src.outils.chemins import dossier_config, dossier_xlsx_propres, dossier_csv_extraits
+    from src.outils.chemins import dossier_config, dossier_xlsx_propres
 except ImportError:
     print("AVERTISSEMENT: Impossible d'importer les modules locaux. Assurez-vous que le script est exécuté depuis la racine du projet.")
     # On définit des chemins par défaut pour que le script puisse s'exécuter
