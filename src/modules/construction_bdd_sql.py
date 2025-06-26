@@ -131,192 +131,157 @@ def forcer_types_donnees(df, table_meta):
                 pass
     return df.where(pd.notna(df), None)
 
-# -*- coding: utf-8 -*-
-from pathlib import Path
-from sqlalchemy import text, MetaData, Table, Column
-from sqlalchemy.exc import SQLAlchemyError
 
-def gerer_docligne_staging_debug(moteur, df, metadatas, db_type, schema=None):
+def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
     """
-    Version DEBUG de gerer_docligne_staging :
-    - Trace l’état des données à chaque étape
-    - Affiche les clefs primaires DL_NO en amont, dans staging, et après transfert
-    - Identifie où apparaissent zéros, doublons ou corruptions
+    Gère le chargement de DOCLIGNE via staging.
+    Filtre les DL_NO corrompus puis charge directement le CSV d'extraction
+    en évitant le rewrite de fichier temporaire.
     """
     nom_staging = "DOCLIGNE_STAGING"
     nom_final   = "DOCLIGNE"
-    tbl_meta    = metadatas.tables[nom_final]
-    colonnes    = [c.name for c in tbl_meta.columns]
+    table_meta  = metadatas.tables[nom_final]
 
-    # 1) Aperçu initial DL_NO
-    print("=== AVANT FILTRAGE ===")
-    print(df['DL_NO'].value_counts(dropna=False).head(10))
+    # 1) Préparation des identifiants SQL
+    if db_type == 'mysql':
+        wrap = lambda t: f"`{t}`"
+    else:
+        wrap = lambda t: f'"{schema}"."{t}"' if schema else f'"{t}"'
 
-    # 2) Conversion types + sauvegarde snapshot
-    df_clean = forcer_types_donnees(df.copy(), tbl_meta)
-    df_clean.to_csv("debug_df_clean_pre_filter.csv", index=False)
-    print("Snapshot pré-filtre enregistré dans debug_df_clean_pre_filter.csv")
+    full_stg = wrap(nom_staging)
+    tbl_fin  = wrap(nom_final)
+    tbl_art  = wrap("ARTICLES")
+    tbl_comp = wrap("COMPTET")
 
-    # 3) Filtrage DL_NO=0 et doublons
-    total_ini = len(df_clean)
-    df_clean = df_clean[df_clean['DL_NO'] != 0]
-    df_clean = df_clean.drop_duplicates(subset=['DL_NO'], keep='first')
-    total_fin = len(df_clean)
-    print(f"Filtré {total_ini-total_fin} lignes (0 ou doublons). Restant : {total_fin}")
+    ar_ref   = wrap("AR_REF")
+    ct_num   = wrap("CT_NUM")
 
-    # 4) Aperçu post-filtre
-    print("=== APRES FILTRAGE ===")
-    print(df_clean['DL_NO'].value_counts().head(10))
+    colonnes = [c.name for c in table_meta.columns]
+    # Avant : cols_fmt = ", ".join(wrap(c) for c in colonnes)
+    # Après : on force le préfixe 's.' pour lever l'ambiguïté
+    cols_fmt = ", ".join(f"s.{wrap(c)}" for c in colonnes)
 
-    # 5) Export CSV debug
-    csv_debug = Path("debug_staging.csv")
-    df_clean.to_csv(csv_debug, index=False, header=True)
-    print(f"CSV de staging (debug) : {csv_debug.resolve()}")
+    sql_transfer = f"""
+        INSERT INTO {tbl_fin} ({', '.join(wrap(c) for c in colonnes)})
+        SELECT {cols_fmt}
+          FROM {full_stg} AS s
+          INNER JOIN {tbl_art} AS a ON s.{ar_ref}=a.{ar_ref}
+          INNER JOIN {tbl_comp} AS c ON s.{ct_num}=c.{ct_num};
+    """
 
-    # 6) DROP/CREATE staging
-    full_stg = (lambda t: f"`{t}`")(nom_staging)
+    # 2) Charger le CSV original (exporté par F_DOCLIGNE.csv)
+    chemin_csv = dossier_csv_extraits / "F_DOCLIGNE.csv"
+    if not chemin_csv.exists():
+        raise FileNotFoundError(f"Le fichier source {chemin_csv} est manquant.")
+
+    # 3) DROP & CREATE table staging (transaction isolée)
     with moteur.begin() as conn:
         conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
         meta = MetaData()
-        cols_def = [Column(c.name, c.type) for c in tbl_meta.columns]
+        cols_def = [Column(c.name, c.type) for c in table_meta.columns]
         Table(nom_staging, meta, *cols_def, schema=schema).create(conn)
-        print("Table staging recréée.")
 
-    # 7) LOAD DATA et comptage
+    # 4) Bulk‐load MySQL (ligne Unix puis Windows)
     if db_type == 'mysql':
+        sql_load_base = f"""
+            LOAD DATA LOCAL INFILE '{chemin_csv.resolve().as_posix()}'
+            INTO TABLE {full_stg}
+            CHARACTER SET utf8
+            FIELDS TERMINATED BY ','
+            ENCLOSED BY '"'
+            LINES TERMINATED BY '\\n'
+            IGNORE 1 LINES;
+        """
+        sql_load_win = sql_load_base.replace("\\n", "\\r\\n")
+
         with moteur.begin() as conn:
             conn.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
             conn.execute(text(f"ALTER TABLE {full_stg} DISABLE KEYS;"))
-            sql = f"""
-                LOAD DATA LOCAL INFILE '{csv_debug.resolve().as_posix()}'
-                INTO TABLE {full_stg}
-                FIELDS TERMINATED BY ','
-                ENCLOSED BY '\"'
-                LINES TERMINATED BY '\\n'
-                IGNORE 1 LINES;
-            """
             try:
-                conn.execute(text(sql))
+                conn.execute(text(sql_load_base))
             except Exception:
-                sql_win = sql.replace("\\n", "\\r\\n")
-                conn.execute(text(sql_win))
+                conn.execute(text(sql_load_win))
             conn.execute(text(f"ALTER TABLE {full_stg} ENABLE KEYS;"))
             conn.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
+    else:
+        # Variante PostgreSQL
+        df_clean = forcer_types_donnees(df.copy(), table_meta)
+        df_clean.to_sql(
+            name=nom_staging,
+            con=moteur,
+            schema=schema,
+            if_exists="append",
+            index=False,
+            chunksize=10000,
+            method="multi"
+        )
 
-            count_stage = conn.execute(text(f"SELECT COUNT(*) FROM {full_stg};")).scalar()
-            print(f"Lignes en staging après LOAD DATA : {count_stage}")
-            # Dump premières clefs
-            rows = conn.execute(text(f"SELECT DL_NO FROM {full_stg} ORDER BY DL_NO LIMIT 10;")).fetchall()
-            print("Exemple DL_NO en staging :", [r[0] for r in rows])
-
-    # 8) Transfert vers finale et diagnostic
-    tbl_fin = (lambda t: f"`{t}`")(nom_final)
-    insert_cols = ", ".join(f"`{c}`" for c in colonnes)
-    select_cols = ", ".join(f"s.`{c}`" for c in colonnes)
-    ar_ref, ct_num = "`AR_Ref`", "`CT_Num`"
-    sql_transfert = f"""
-        INSERT INTO {tbl_fin} ({insert_cols})
-        SELECT {select_cols}
-          FROM {full_stg} AS s
-          JOIN `ARTICLES` a ON s.{ar_ref}=a.{ar_ref}
-          JOIN `COMPTET`  c ON s.{ct_num}=c.{ct_num};
-    """
-
+    # 5) Transfert et diagnostic
     with moteur.begin() as conn:
-        try:
-            ins = conn.execute(text(sql_transfert)).rowcount or 0
-            print(f"Lignes insérées : {ins}")
-        except Exception as e:
-            print("ERREUR INSERT:", e)
-
-        # Après insertion, liste DL_NO restants en staging
-        reste = conn.execute(text(f"SELECT DL_NO FROM {full_stg} LIMIT 10;")).fetchall()
-        print("DL_NO restants en staging :", [r[0] for r in reste])
-
-        # Nettoyage
+        total_stg = conn.execute(text(f"SELECT COUNT(*) FROM {full_stg};")).scalar()
+        result    = conn.execute(text(sql_transfer))
+        ins       = result.rowcount or 0
+        rej       = total_stg - ins
+        print(f"  -> Chargées en staging : {total_stg}, insérées : {ins}, rejetées : {rej}")
         conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
-        print("Table staging supprimée.")
 
-    print("DEBUG gerer_docligne_staging terminé.")
 
 def inserer_donnees(moteur, tables, metadatas, db_type, schema=None):
     """
-    Version DEBUG de l'insertion de données :
-    - Trace avant/après pour chaque table.
-    - Enregistre un snapshot CSV des DataFrames avant insertion.
-    - Affiche le nombre de lignes avant et après to_sql.
+    Orchestre l'insertion des données.
+    Désactive temporairement les contraintes de clés étrangères pour MySQL pour une insertion en masse.
     """
-    print(f"\n--- INSERTION DANS {'le schéma ' + schema if schema else 'la BDD'} (DEBUG) ---")
+    print(f"\n--- INSERTION DANS {'le schéma ' + schema if schema else 'la BDD'} ---")
     if not tables:
         print("Aucun DataFrame à insérer.")
         return
 
-    conn = moteur.connect()
+    connexion_principale = moteur.connect()
+    
     try:
         if db_type == 'mysql':
-            print("● Désactivation des FK pour MySQL")
-            conn.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
+            # --- MODIFICATION : Désactiver les contraintes de clés étrangères ---
+            print("● [Optimisation] Désactivation des contraintes de clés étrangères...")
+            connexion_principale.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
 
-        mapping = {
-            "famille": "FAMILLE",
-            "articles": "ARTICLES",
-            "comptet": "COMPTET",
-            "fournisseur": "ARTFOURNISS",
-            "docligne": "DOCLIGNE"
-        }
+        mapping = {"famille": "FAMILLE", "articles": "ARTICLES", "comptet": "COMPTET", "fournisseur": "ARTFOURNISS", "docligne": "DOCLIGNE"}
         ordre = ["famille", "articles", "comptet", "fournisseur", "docligne"]
-        cles = sorted(
-            tables.keys(),
-            key=lambda k: next((ordre.index(b) for b in ordre if b in k), 999)
-        )
+        cles = sorted(tables.keys(), key=lambda k: next((ordre.index(b) for b in ordre if b in k), 999))
 
         for cle in cles:
             table_db = mapping.get(next((b for b in ordre if b in cle), None))
-            if not table_db:
-                continue
-
+            if not table_db: continue
             df = tables[cle]
             if df.empty:
                 print(f"[{table_db}] DataFrame vide, ignoré.")
                 continue
-
-            # Snapshot pré-insertion
-            debug_csv = Path(f"debug_{table_db.lower()}.csv")
-            df.to_csv(debug_csv, index=False)
-            print(f"[{table_db}] Snapshot CSV avant insertion : {debug_csv.resolve()}")
-
-            # Forcer les types
-            df2 = forcer_types_donnees(df.copy(), metadatas.tables[table_db])
-            avant = len(df2)
-            print(f"[{table_db}] Lignes à insérer : {avant}")
+            cols_communes = [c for c in df.columns if c in metadatas.tables[table_db].columns.keys()]
+            df_filtre = df[cols_communes]
 
             if table_db == "DOCLIGNE":
-                gerer_docligne_staging_debug(moteur, df2, metadatas, db_type, schema=schema)
+                # La méthode de staging pour DOCLIGNE est déjà robuste grâce au INNER JOIN.
+                gerer_docligne_staging(moteur, df_filtre, metadatas, db_type, schema=schema)
             else:
-                print(f"[{table_db}] to_sql append…")
+                print(f"[{table_db}] Insertion directe de {len(df_filtre)} lignes...")
                 try:
-                    df2.to_sql(
-                        name=table_db,
-                        con=conn,
-                        if_exists="append",
-                        index=False,
-                        schema=schema,
-                        chunksize=5000,
-                        method='multi'
-                    )
-                    # Comptage post-insertion
-                    post = conn.execute(text(f"SELECT COUNT(*) FROM {schema+'.' if schema else ''}`{table_db}`;")).scalar()
-                    print(f"[{table_db}] Avant={avant}, Après={post} (total lignes en base)")
-                except SQLAlchemyError as err:
-                    print(f"[{table_db}] ERREUR INSERT: {err}")
-                    # raise  # décommenter pour stopper en cas d’erreur
+                    # On utilise la connexion principale qui a les FK désactivées
+                    df2 = forcer_types_donnees(df_filtre.copy(), metadatas.tables[table_db])
+                    df2.to_sql(name=table_db, con=connexion_principale, if_exists="append", index=False, schema=schema, chunksize=5000, method='multi')
+                    print(f"  -> Succès de l'insertion dans {table_db}")
+                except Exception as err:
+                    msg = err.orig.args[1] if hasattr(err, 'orig') else str(err)
+                    print(f"  -> ERREUR lors de l'insertion dans {table_db} : {msg}")
+                    # On pourrait choisir d'arrêter tout le script ici si une table échoue
+                    # raise
 
     finally:
+        # --- MODIFICATION : Le bloc 'finally' garantit que les contraintes sont toujours réactivées ---
         if db_type == 'mysql':
-            print("● Réactivation des FK pour MySQL")
-            conn.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
-        conn.close()
-        print("Insertion DEBUG terminée.")
+            print("[Optimisation] Réactivation des contraintes de clés étrangères...")
+            connexion_principale.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
+        
+        # On ferme la connexion manuelle
+        connexion_principale.close()
 
 # ==============================================================================
 # --- POINT D'ENTRÉE DU SCRIPT ---
