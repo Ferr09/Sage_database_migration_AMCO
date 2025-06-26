@@ -133,106 +133,92 @@ def forcer_types_donnees(df, table_meta):
 
 def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
     """
-    Gère le chargement de DOCLIGNE via staging.
-    Filtre las filas con DL_NO = 0 y los duplicados antes del LOAD DATA.
+    Gère le chargement de DOCLIGNE avec une syntaxe LOAD DATA simplifiée et
+    robuste, spécialement pour MySQL 5.6.
     """
     nom_staging = "DOCLIGNE_STAGING"
     nom_final   = "DOCLIGNE"
     table_meta  = metadatas.tables[nom_final]
 
-    # Quoting uniforme
-    wrap = (lambda t: f"`{t}`") if db_type=='mysql' else \
-           (lambda t: f'"{schema}"."{t}"' if schema else f'"{t}"')
+    chemin_csv_original = dossier_csv_extraits / "F_DOCLIGNE.csv"
 
+    if not chemin_csv_original.exists():
+        print(f"  -> ERREUR CRITIQUE: Le fichier CSV d'origine est introuvable : {chemin_csv_original}")
+        raise FileNotFoundError(f"Le fichier source {chemin_csv_original} est requis pour le staging.")
+
+    if db_type != 'mysql':
+        print("  -> AVERTISSEMENT: Cette méthode de chargement est optimisée pour MySQL et sera ignorée.")
+        return
+
+    wrap = lambda t: f"`{t}`"
     full_stg = wrap(nom_staging)
-    tbl_fin  = wrap(nom_final)
-    tbl_art  = wrap("ARTICLES")
-    tbl_comp = wrap("COMPTET")
-    colonnes = [c.name for c in table_meta.columns]
-    cols_fmt = ", ".join(wrap(c) for c in colonnes)
-    ar_ref   = wrap("AR_Ref")
-    ct_num   = wrap("CT_Num")
+    tbl_final, tbl_art, tbl_comp = wrap(nom_final), wrap("ARTICLES"), wrap("COMPTET")
+    cols_fmt = ", ".join(wrap(c.name) for c in table_meta.columns)
+    ar_ref, ct_num = wrap('AR_REF'), wrap('CT_NUM')
 
-    sql_transfer = f"""
-        INSERT INTO {tbl_fin} ({cols_fmt})
-        SELECT {cols_fmt}
-          FROM {full_stg} s
-          INNER JOIN {tbl_art} a ON s.{ar_ref}=a.{ar_ref}
-          INNER JOIN {tbl_comp} c ON s.{ct_num}=c.{ct_num};
-    """
-
-    # 1) Forzar tipos
-    df_clean = forcer_types_donnees(df.copy(), table_meta)
-
-    # 2) Filtrar DL_NO = 0 y duplicados
-    total_ini = len(df_clean)
-    df_clean = df_clean[df_clean['DL_NO'] != 0]
-    df_clean = df_clean.drop_duplicates(subset=['DL_NO'], keep='first')
-    total_fin = len(df_clean)
-    eliminadas = total_ini - total_fin
-    print(f"  -> FILTRO DL_NO: eliminadas {eliminadas} filas (0 o duplicadas).")
-
-    # 3) Exportar CSV con cabecera para preservar orden de columnas
-    csv_file = Path.cwd() / f"{nom_staging}.csv"
-    df_clean.to_csv(csv_file, index=False, header=True)
-
+    sql_transfer = f"INSERT INTO {tbl_final} ({cols_fmt}) SELECT s.* FROM {full_stg} s JOIN {tbl_art} a ON s.{ar_ref}=a.{ar_ref} JOIN {tbl_comp} c ON s.{ct_num}=c.{ct_num};"
+    
     try:
-        # A) DROP/CREATE staging en transacción aislada
         with moteur.begin() as conn:
+            print(f"  -> Création de la table de staging '{nom_staging}'...")
             conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
-            meta = MetaData()
-            cols_def = [Column(c.name, c.type) for c in table_meta.columns]
-            Table(nom_staging, meta, *cols_def, schema=schema).create(conn)
+            Table(nom_staging, MetaData(), *[Column(c.name, c.type) for c in table_meta.columns], schema=schema).create(conn)
 
-        # B) Bulk-load + transfer
-        with moteur.begin() as conn:
-            if db_type=='mysql':
-                conn.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
-                conn.execute(text(f"ALTER TABLE {full_stg} DISABLE KEYS;"))
+            print(f"  -> Chargement direct du fichier '{chemin_csv_original.name}' dans la table de staging...")
+            
+            chemin_sql_safe = Path(chemin_csv_original).resolve().as_posix()
+            
+            # --- SIMPLIFICATION POUR COMPATIBILITÉ AVEC MYSQL 5.6 ---
+            # 1. On utilise 'utf8' au lieu de 'utf8mb4'. C'est beaucoup plus sûr pour les anciennes versions.
+            # 2. On sépare les tentatives de manière plus claire.
+            
+            # Tentative 1 : Le cas le plus courant (fichiers Linux/Mac ou normalisés)
+            sql_load_base = f"""
+                LOAD DATA LOCAL INFILE '{chemin_sql_safe}'
+                INTO TABLE {full_stg}
+                CHARACTER SET utf8
+                FIELDS TERMINATED BY ','
+                ENCLOSED BY '"'
+                LINES TERMINATED BY '\\n'
+                IGNORE 1 LINES;
+            """
+            
+            # Tentative 2 : Le cas pour les fichiers générés sous Windows
+            sql_load_windows = f"""
+                LOAD DATA LOCAL INFILE '{chemin_sql_safe}'
+                INTO TABLE {full_stg}
+                CHARACTER SET utf8
+                FIELDS TERMINATED BY ','
+                ENCLOSED BY '"'
+                LINES TERMINATED BY '\\r\\n'
+                IGNORE 1 LINES;
+            """
+            
+            try:
+                print("  -> Tentative de chargement avec terminateur de ligne '\\n' (standard)...")
+                conn.execute(text(sql_load_base))
+            except Exception as e:
+                print(f"  -> Échec. Tentative avec terminateur de ligne '\\r\\n' (Windows)...")
+                # Si la première tentative échoue, on essaie la version pour Windows
+                try:
+                    conn.execute(text(sql_load_windows))
+                except Exception as final_e:
+                    print("  -> ERREUR: Les deux tentatives de chargement ont échoué.")
+                    print(f"  -> La dernière erreur de syntaxe (1064) est probablement due au format du fichier CSV lui-même.")
+                    print(f"  -> Erreur d'origine : {final_e}")
+                    raise final_e
 
-                ruta = str(csv_file).replace("\\\\", "/")
-                sql_load = f"""
-                    LOAD DATA LOCAL INFILE '{ruta}'
-                    INTO TABLE {full_stg}
-                    FIELDS TERMINATED BY ','
-                    ENCLOSED BY '"'
-                    LINES TERMINATED BY '\\n'
-                    IGNORE 1 LINES;
-                """
-                conn.execute(text(sql_load))
+            lignes_chargees_staging = conn.execute(text(f"SELECT COUNT(*) FROM {full_stg};")).scalar()
+            print(f"  -> {lignes_chargees_staging} lignes chargées avec succès dans '{nom_staging}'.")
 
-                conn.execute(text(f"ALTER TABLE {full_stg} ENABLE KEYS;"))
-                conn.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
-            else:
-                # Variante PostgreSQL
-                df_clean.to_sql(
-                    name=nom_staging,
-                    con=conn,
-                    schema=schema,
-                    if_exists="append",
-                    index=False,
-                    chunksize=10000,
-                    method="multi"
-                )
+            print(f"  -> Transfert des données de '{nom_staging}' vers '{nom_final}'...")
+            result = conn.execute(text(sql_transfer))
+            ins = result.rowcount or 0
+            print(f"  -> Lignes insérées : {ins}, Lignes rejetées : {lignes_chargees_staging - ins}")
 
-            # Transferir a la tabla final
-            resultado = conn.execute(text(sql_transfer))
-            ins = resultado.rowcount or 0
-            rej = total_fin - ins
-            print(f"  -> Insertadas: {ins}, Rechazadas: {rej}")
-
-            # Limpiar staging
-            conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
-
-        print("  -> gerer_docligne_staging terminado correctamente.")
     except SQLAlchemyError as e:
-        print(f"  -> ERROR crítico en staging: {e}")
+        print(f"  -> ERREUR critique pendant le staging : {e}")
         raise
-    finally:
-        try:
-            csv_file.unlink()
-        except OSError:
-            pass
 
 def inserer_donnees(moteur, tables, metadatas, db_type, schema=None):
     """
