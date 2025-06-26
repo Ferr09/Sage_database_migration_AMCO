@@ -134,15 +134,78 @@ def forcer_types_donnees(df, table_meta):
 
 def gerer_docligne_staging_debug(moteur, df, metadatas, db_type, schema=None):
     """
-    DEBUG complet du staging de DOCLIGNE.
-    Trace et n'opère que sur DOCLIGNE_STAGING, sans toucher à DOCLIGNE.
+    Version DEBUG de gerer_docligne_staging :
+    - Trace l’état des données à chaque étape
+    - Affiche les clefs primaires DL_NO en amont, dans staging, et après transfert
+    - Identifie où apparaissent zéros, doublons ou corruptions
     """
     nom_staging = "DOCLIGNE_STAGING"
     nom_final   = "DOCLIGNE"
     tbl_meta    = metadatas.tables[nom_final]
     colonnes    = [c.name for c in tbl_meta.columns]
 
-    # === Préparation du quoting une seule fois ===
+    # 1) Aperçu initial DL_NO
+    print("=== AVANT FILTRAGE ===")
+    print(df['DL_NO'].value_counts(dropna=False).head(10))
+
+    # 2) Conversion types + sauvegarde snapshot
+    df_clean = forcer_types_donnees(df.copy(), tbl_meta)
+    df_clean.to_csv("debug_df_clean_pre_filter.csv", index=False)
+    print("Snapshot pré-filtre enregistré dans debug_df_clean_pre_filter.csv")
+
+    # 3) Filtrage DL_NO=0 et doublons
+    total_ini = len(df_clean)
+    df_clean = df_clean[df_clean['DL_NO'] != 0]
+    df_clean = df_clean.drop_duplicates(subset=['DL_NO'], keep='first')
+    total_fin = len(df_clean)
+    print(f"Filtré {total_ini-total_fin} lignes (0 ou doublons). Restant : {total_fin}")
+
+    # 4) Aperçu post-filtre
+    print("=== APRES FILTRAGE ===")
+    print(df_clean['DL_NO'].value_counts().head(10))
+
+    # 5) Export CSV debug
+    csv_debug = Path("debug_staging.csv")
+    df_clean.to_csv(csv_debug, index=False, header=True)
+    print(f"CSV de staging (debug) : {csv_debug.resolve()}")
+
+    # 6) DROP/CREATE staging
+    full_stg = (lambda t: f"`{t}`")(nom_staging)
+    with moteur.begin() as conn:
+        conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
+        meta = MetaData()
+        cols_def = [Column(c.name, c.type) for c in tbl_meta.columns]
+        Table(nom_staging, meta, *cols_def, schema=schema).create(conn)
+        print("Table staging recréée.")
+
+    # 7) LOAD DATA et comptage
+    if db_type == 'mysql':
+        with moteur.begin() as conn:
+            conn.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
+            conn.execute(text(f"ALTER TABLE {full_stg} DISABLE KEYS;"))
+            sql = f"""
+                LOAD DATA LOCAL INFILE '{csv_debug.resolve().as_posix()}'
+                INTO TABLE {full_stg}
+                FIELDS TERMINATED BY ','
+                ENCLOSED BY '\"'
+                LINES TERMINATED BY '\\n'
+                IGNORE 1 LINES;
+            """
+            try:
+                conn.execute(text(sql))
+            except Exception:
+                sql_win = sql.replace("\\n", "\\r\\n")
+                conn.execute(text(sql_win))
+            conn.execute(text(f"ALTER TABLE {full_stg} ENABLE KEYS;"))
+            conn.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
+
+            count_stage = conn.execute(text(f"SELECT COUNT(*) FROM {full_stg};")).scalar()
+            print(f"Lignes en staging après LOAD DATA : {count_stage}")
+            # Dump premières clefs
+            rows = conn.execute(text(f"SELECT DL_NO FROM {full_stg} ORDER BY DL_NO LIMIT 10;")).fetchall()
+            print("Exemple DL_NO en staging :", [r[0] for r in rows])
+
+    # Définition du quoting avant l’étape 8
     if db_type == 'mysql':
         wrap = lambda t: f"`{t}`"
     else:
@@ -152,79 +215,24 @@ def gerer_docligne_staging_debug(moteur, df, metadatas, db_type, schema=None):
     tbl_fin     = wrap(nom_final)
     tbl_art     = wrap("ARTICLES")
     tbl_comp    = wrap("COMPTET")
-    ar_ref      = wrap("AR_Ref")
-    ct_num      = wrap("CT_Num")
     insert_cols = ", ".join(wrap(c) for c in colonnes)
     select_cols = ", ".join(f"s.{wrap(c)}" for c in colonnes)
+    ar_ref, ct_num = wrap("AR_Ref"), wrap("CT_Num")
 
-    # === 1) Aperçu initial ===
-    print("=== AVANT FILTRAGE ===")
-    print(df['DL_NO'].value_counts(dropna=False).head(10))
-
-    # === 2) Conversion + snapshot ===
-    df_clean = forcer_types_donnees(df.copy(), tbl_meta)
-    df_clean.to_csv("debug_pre_filter.csv", index=False)
-    print("Snapshot pré-filtre -> debug_pre_filter.csv")
-
-    # === 3) Filtrage DL_NO ===
-    total_ini = len(df_clean)
-    df_clean = df_clean[df_clean['DL_NO'] != 0]
-    df_clean = df_clean.drop_duplicates(subset=['DL_NO'], keep='first')
-    total_fin = len(df_clean)
-    print(f"Filtré {total_ini-total_fin} lignes; restant {total_fin}")
-
-    # === 4) Export CSV staging ===
-    csv_debug = Path("debug_staging.csv")
-    df_clean.to_csv(csv_debug, index=False, header=True)
-    print("CSV staging -> debug_staging.csv")
-
-    # === 5) DROP / CREATE DOCLIGNE_STAGING SEULEMENT ===
-    with moteur.begin() as conn:
-        conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
-        meta = MetaData()
-        cols_def = [Column(c.name, c.type) for c in tbl_meta.columns]
-        Table(nom_staging, meta, *cols_def, schema=schema).create(conn)
-        print("Table DOCLIGNE_STAGING recréée.")
-
-    # === 6) LOAD DATA LOCAL INFILE ===
-    if db_type == 'mysql':
-        with moteur.begin() as conn:
-            conn.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
-            conn.execute(text(f"ALTER TABLE {full_stg} DISABLE KEYS;"))
-            chemin = csv_debug.resolve().as_posix()
-            sql = f"""
-                LOAD DATA LOCAL INFILE '{chemin}'
-                INTO TABLE {full_stg}
-                FIELDS TERMINATED BY ','
-                ENCLOSED BY '"'
-                LINES TERMINATED BY '\\n'
-                IGNORE 1 LINES;
-            """
-            try:
-                conn.execute(text(sql))
-            except:
-                conn.execute(text(sql.replace("\\n", "\\r\\n")))
-            conn.execute(text(f"ALTER TABLE {full_stg} ENABLE KEYS;"))
-            conn.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
-
-        with moteur.begin() as conn:
-            count_stage = conn.execute(text(f"SELECT COUNT(*) FROM {full_stg};")).scalar()
-            print(f"Lignes en staging après LOAD DATA : {count_stage}")
-            sample = conn.execute(text(f"SELECT DL_NO FROM {full_stg} ORDER BY DL_NO LIMIT 10;")).fetchall()
-            print("Échantillon DL_NO staging:", [r[0] for r in sample])
-
-    # === 7) INSERT ... SELECT avec ou sans fournisseur ===
+    # 8) Transfert vers finale et diagnostic
     if schema and schema.lower() == "achats":
-        sql_transfer = f"""
+        # Pour le schéma Achats, on ajoute le JOIN sur ARTFOURNISS
+        sql_transfert = f"""
             INSERT INTO {tbl_fin} ({insert_cols})
             SELECT {select_cols}
               FROM {full_stg} AS s
-              JOIN {tbl_art} a ON s.{ar_ref}=a.{ar_ref}
-              JOIN {tbl_comp} c ON s.{ct_num}=c.{ct_num}
+              JOIN {tbl_art}    a ON s.{ar_ref}=a.{ar_ref}
+              JOIN {tbl_comp}   c ON s.{ct_num}=c.{ct_num}
               JOIN `ARTFOURNISS` f ON s.`AF_REFFOURNISS`=f.`AF_REFFOURNISS`;
         """
     else:
-        sql_transfer = f"""
+        # Cas Ventes (ou générique) : seulement ARTICLES + COMPTET
+        sql_transfert = f"""
             INSERT INTO {tbl_fin} ({insert_cols})
             SELECT {select_cols}
               FROM {full_stg} AS s
@@ -232,17 +240,18 @@ def gerer_docligne_staging_debug(moteur, df, metadatas, db_type, schema=None):
               JOIN {tbl_comp} c ON s.{ct_num}=c.{ct_num};
         """
 
-    # === 8) Exécution de l'INSERT et diagnostics finaux ===
     with moteur.begin() as conn:
         try:
-            ins = conn.execute(text(sql_transfer)).rowcount or 0
+            ins = conn.execute(text(sql_transfert)).rowcount or 0
             print(f"Lignes insérées : {ins}")
         except Exception as e:
             print("ERREUR INSERT:", e)
-        remaining = conn.execute(text(f"SELECT COUNT(*) FROM {full_stg};")).scalar()
-        print(f"Lignes encore en staging après transfert : {remaining}")
+
+        reste = conn.execute(text(f"SELECT DL_NO FROM {full_stg} LIMIT 10;")).fetchall()
+        print("DL_NO restants en staging :", [r[0] for r in reste])
+
         conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
-        print("Table staging supprimée définitivement.")
+        print("Table staging supprimée.")
 
     print("DEBUG gerer_docligne_staging terminé.")
 
