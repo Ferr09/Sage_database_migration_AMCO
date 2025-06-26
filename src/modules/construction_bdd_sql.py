@@ -130,7 +130,11 @@ def forcer_types_donnees(df, table_meta):
             except Exception:
                 pass
     return df.where(pd.notna(df), None)
-r
+
+# -*- coding: utf-8 -*-
+from pathlib import Path
+from sqlalchemy import text, MetaData, Table, Column
+from sqlalchemy.exc import SQLAlchemyError
 
 def gerer_docligne_staging_debug(moteur, df, metadatas, db_type, schema=None):
     """
@@ -206,31 +210,17 @@ def gerer_docligne_staging_debug(moteur, df, metadatas, db_type, schema=None):
             print("Exemple DL_NO en staging :", [r[0] for r in rows])
 
     # 8) Transfert vers finale et diagnostic
-    tbl_fin     = lambda t: f"`{t}`"(nom_final)
+    tbl_fin = (lambda t: f"`{t}`")(nom_final)
     insert_cols = ", ".join(f"`{c}`" for c in colonnes)
     select_cols = ", ".join(f"s.`{c}`" for c in colonnes)
     ar_ref, ct_num = "`AR_Ref`", "`CT_Num`"
-
-    if schema and schema.lower() == "achats":
-        # Pour le schéma Achats, on ajoute le JOIN sur ARTFOURNISS
-        sql_transfert = f"""
-            INSERT INTO {tbl_fin(nom_final)} ({insert_cols})
-            SELECT {select_cols}
-              FROM {full_stg} AS s
-              JOIN `ARTICLES`    a ON s.{ar_ref}=a.{ar_ref}
-              JOIN `COMPTET`     c ON s.{ct_num}=c.{ct_num}
-              JOIN `ARTFOURNISS` f ON s.`AF_REFFOURNISS`=f.`AF_REFFOURNISS`;
-        """
-    else:
-        # Cas Ventes (ou générique) : seulement ARTICLES + COMPTET
-        sql_transfert = f"""
-            INSERT INTO {tbl_fin(nom_final)} ({insert_cols})
-            SELECT {select_cols}
-              FROM {full_stg} AS s
-              JOIN `ARTICLES` a ON s.{ar_ref}=a.{ar_ref}
-              JOIN `COMPTET`  c ON s.{ct_num}=c.{ct_num};
-        """
-
+    sql_transfert = f"""
+        INSERT INTO {tbl_fin} ({insert_cols})
+        SELECT {select_cols}
+          FROM {full_stg} AS s
+          JOIN `ARTICLES` a ON s.{ar_ref}=a.{ar_ref}
+          JOIN `COMPTET`  c ON s.{ct_num}=c.{ct_num};
+    """
 
     with moteur.begin() as conn:
         try:
