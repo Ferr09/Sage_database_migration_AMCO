@@ -74,22 +74,12 @@ def nettoyer_et_exporter_csv(chemin_csv: Path, nom_table: str):
         df_clean = df.dropna(how='all')
         df_clean = df_clean.loc[~(df_clean.isna() | (df_clean == 0)).all(axis=1)]
 
-        # Cas particulier : F_ARTFOURNISS - Nettoyage avancé
+        # Cas particulier : suppression des lignes sans AF_REFFOURNISS pour F_ARTFOURNISS
         if nom_table == "F_ARTFOURNISS":
-            # 1. Suppression des lignes sans AF_REFFOURNISS
-            before_na = len(df_clean)
-            df_clean = df_clean.dropna(subset=["AF_REFFOURNISS"])
-            removed_na = before_na - len(df_clean)
-            if removed_na > 0:
-                print(f"🧹 {nom_table} : {removed_na} ligne(s) sans AF_REFFOURNISS supprimée(s)")
-
-            # 2. Suppression des doublons basés sur AF_REFFOURNISS
-            before_dedup = len(df_clean)
-            df_clean = df_clean.drop_duplicates(subset=["AF_REFFOURNISS"], keep="first")
-            removed_duplicates = before_dedup - len(df_clean)
-            if removed_duplicates > 0:
-                print(f"✨ {nom_table} : {removed_duplicates} doublon(s) sur AF_REFFOURNISS supprimé(s)")
-
+            before = len(df_clean)
+            df_clean = df_clean[df_clean["AF_REFFOURNISS"].notna()]
+            removed = before - len(df_clean)
+            print(f"{nom_table} : {removed} ligne(s) sans AF_REFFOURNISS supprimée(s)")
 
         # Cas particulier : F_DOCLIGNE extraction du n° de BL
         if nom_table == "F_DOCLIGNE":
