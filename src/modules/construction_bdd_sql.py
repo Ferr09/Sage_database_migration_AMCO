@@ -131,18 +131,21 @@ def forcer_types_donnees(df, table_meta):
                 pass
     return df.where(pd.notna(df), None)
 
+# -*- coding: utf-8 -*-
+from pathlib import Path
+from sqlalchemy import text, MetaData, Table, Column
+from sqlalchemy.exc import SQLAlchemyError
 
 def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
     """
     Gère le chargement de DOCLIGNE via staging.
-    Filtre les DL_NO corrompus puis charge directement le CSV d'extraction
-    en évitant le rewrite de fichier temporaire.
+    Filtre les lignes où DL_NO = 0 et les doublons avant le LOAD DATA.
     """
     nom_staging = "DOCLIGNE_STAGING"
     nom_final   = "DOCLIGNE"
     table_meta  = metadatas.tables[nom_final]
 
-    # 1) Préparation des identifiants SQL
+    # 1) Préparer le quoting des identifiants
     if db_type == 'mysql':
         wrap = lambda t: f"`{t}`"
     else:
@@ -152,7 +155,6 @@ def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
     tbl_fin  = wrap(nom_final)
     tbl_art  = wrap("ARTICLES")
     tbl_comp = wrap("COMPTET")
-
     colonnes = [c.name for c in table_meta.columns]
     cols_fmt = ", ".join(wrap(c) for c in colonnes)
     ar_ref   = wrap("AR_Ref")
@@ -166,61 +168,81 @@ def gerer_docligne_staging(moteur, df, metadatas, db_type, schema=None):
           INNER JOIN {tbl_comp} AS c ON s.{ct_num}=c.{ct_num};
     """
 
-    # 2) Charger le CSV original (exporté par F_DOCLIGNE.csv)
-    chemin_csv = dossier_csv_extraits / "F_DOCLIGNE.csv"
-    if not chemin_csv.exists():
-        raise FileNotFoundError(f"Le fichier source {chemin_csv} est manquant.")
+    # 2) Conversion des types
+    df_clean = forcer_types_donnees(df.copy(), table_meta)
 
-    # 3) DROP & CREATE table staging (transaction isolée)
-    with moteur.begin() as conn:
-        conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
-        meta = MetaData()
-        cols_def = [Column(c.name, c.type) for c in table_meta.columns]
-        Table(nom_staging, meta, *cols_def, schema=schema).create(conn)
+    # 3) Filtrage DL_NO = 0 et suppression des doublons
+    total_initial = len(df_clean)
+    df_clean = df_clean[df_clean['DL_NO'] != 0]
+    df_clean = df_clean.drop_duplicates(subset=['DL_NO'], keep='first')
+    total_final = len(df_clean)
+    supprimees = total_initial - total_final
+    print(f"  -> FILTRE DL_NO : {supprimees} lignes supprimées (0 ou doublons)")
 
-    # 4) Bulk‐load MySQL (ligne Unix puis Windows)
-    if db_type == 'mysql':
-        sql_load_base = f"""
-            LOAD DATA LOCAL INFILE '{chemin_csv.resolve().as_posix()}'
-            INTO TABLE {full_stg}
-            CHARACTER SET utf8
-            FIELDS TERMINATED BY ','
-            ENCLOSED BY '"'
-            LINES TERMINATED BY '\\n'
-            IGNORE 1 LINES;
-        """
-        sql_load_win = sql_load_base.replace("\\n", "\\r\\n")
+    # 4) Export CSV avec en-tête
+    csv_file = Path.cwd() / f"{nom_staging}.csv"
+    df_clean.to_csv(csv_file, index=False, header=True)
 
+    try:
+        # A) Création isolée de la table de staging
         with moteur.begin() as conn:
-            conn.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
-            conn.execute(text(f"ALTER TABLE {full_stg} DISABLE KEYS;"))
-            try:
-                conn.execute(text(sql_load_base))
-            except Exception:
-                conn.execute(text(sql_load_win))
-            conn.execute(text(f"ALTER TABLE {full_stg} ENABLE KEYS;"))
-            conn.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
-    else:
-        # Variante PostgreSQL
-        df_clean = forcer_types_donnees(df.copy(), table_meta)
-        df_clean.to_sql(
-            name=nom_staging,
-            con=moteur,
-            schema=schema,
-            if_exists="append",
-            index=False,
-            chunksize=10000,
-            method="multi"
-        )
+            conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
+            meta = MetaData()
+            cols_def = [Column(c.name, c.type) for c in table_meta.columns]
+            Table(nom_staging, meta, *cols_def, schema=schema).create(conn)
 
-    # 5) Transfert et diagnostic
-    with moteur.begin() as conn:
-        total_stg = conn.execute(text(f"SELECT COUNT(*) FROM {full_stg};")).scalar()
-        result    = conn.execute(text(sql_transfer))
-        ins       = result.rowcount or 0
-        rej       = total_stg - ins
-        print(f"  -> Chargées en staging : {total_stg}, insérées : {ins}, rejetées : {rej}")
-        conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
+        # B) Chargement en masse + transfert
+        with moteur.begin() as conn:
+            if db_type == 'mysql':
+                # Désactivation des contraintes et index
+                conn.execute(text("SET FOREIGN_KEY_CHECKS = 0;"))
+                conn.execute(text(f"ALTER TABLE {full_stg} DISABLE KEYS;"))
+
+                # Préparer le chemin pour MySQL
+                chemin = str(csv_file).replace("\\\\", "/")
+                sql_load = f"""
+                    LOAD DATA LOCAL INFILE '{chemin}'
+                    INTO TABLE {full_stg}
+                    FIELDS TERMINATED BY ','
+                    ENCLOSED BY '\"'
+                    LINES TERMINATED BY '\\n'
+                    IGNORE 1 LINES;
+                """
+                conn.execute(text(sql_load))
+
+                # Réactivation des contraintes et index
+                conn.execute(text(f"ALTER TABLE {full_stg} ENABLE KEYS;"))
+                conn.execute(text("SET FOREIGN_KEY_CHECKS = 1;"))
+            else:
+                # Variante PostgreSQL
+                df_clean.to_sql(
+                    name=nom_staging,
+                    con=conn,
+                    schema=schema,
+                    if_exists="append",
+                    index=False,
+                    chunksize=10000,
+                    method="multi"
+                )
+
+            # Transfert vers la table finale
+            resultat = conn.execute(text(sql_transfer))
+            inserees = resultat.rowcount or 0
+            rejetees = total_final - inserees
+            print(f"  -> {inserees} lignes insérées, {rejetees} lignes rejetées")
+
+            # Suppression de la table staging
+            conn.execute(text(f"DROP TABLE IF EXISTS {full_stg};"))
+
+        print("  -> gerer_docligne_staging terminé avec succès.")
+    except SQLAlchemyError as e:
+        print(f"  -> ERREUR critique dans le staging : {e}")
+        raise
+    finally:
+        try:
+            csv_file.unlink()
+        except OSError:
+            pass
 
 
 def inserer_donnees(moteur, tables, metadatas, db_type, schema=None):
