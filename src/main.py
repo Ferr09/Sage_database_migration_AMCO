@@ -21,8 +21,8 @@ from src.outils.chemins import (
     dossier_modules,
     dossier_outils,
     dossier_db_access,
-    dossier_csv_extraits,
-    dossier_xlsx_propres,
+    dossier_datalake_raw_sage,
+    dossier_datalake_staging_sage,
     chemin_requirements_extraction,
     chemin_requirements_mysql,
     chemin_requirements_postgresql

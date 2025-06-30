@@ -4,7 +4,7 @@ import pandas as pd
 # === Dossiers ===
 from src.outils.chemins import (
     dossier_tables_statistiques,
-    dossier_csv_extraits
+    dossier_datalake_raw_sage
 ) 
 
 # Création du dossier pour les statistiques
@@ -17,12 +17,12 @@ tables_plus_de_10 = []
 tables_plus_de_100 = []
 
 # Analyse brute sans nettoyage
-fichiers = [f for f in os.listdir(dossier_csv_extraits) if f.endswith(".csv")]
-print(f"{len(fichiers)} fichier(s) détecté(s) dans le dossier : {dossier_csv_extraits}\n")
+fichiers = [f for f in os.listdir(dossier_datalake_raw_sage) if f.endswith(".csv")]
+print(f"{len(fichiers)} fichier(s) détecté(s) dans le dossier : {dossier_datalake_raw_sage}\n")
 
 for fichier in fichiers:
     nom_table = os.path.splitext(fichier)[0]
-    chemin_csv = os.path.join(dossier_csv_extraits, fichier)
+    chemin_csv = os.path.join(dossier_datalake_raw_sage, fichier)
 
     try:
         df = pd.read_csv(chemin_csv, encoding="utf-8-sig")

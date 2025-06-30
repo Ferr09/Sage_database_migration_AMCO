@@ -7,7 +7,7 @@ from pathlib import Path
 # --------------------------------------------------------------------
 # Importation des chemins absolus depuis outils.chemins
 # --------------------------------------------------------------------
-from outils.chemins import racine_projet, dossier_statistiques, dossier_csv_extraits
+from outils.chemins import racine_projet, dossier_statistiques, dossier_datalake_raw_sage
 
 # --------------------------------------------------------------------
 # Groupes métiers et tables associées
@@ -96,7 +96,7 @@ def rechercher_dans_fichiers(dossier: Path, mot_cle: str) -> None:
 # --------------------------------------------------------------------
 if __name__ == "__main__":
     # Dossier où se trouvent les fichiers « _entetes.txt »
-    dossier_txt = dossier_csv_extraits
+    dossier_txt = dossier_datalake_raw_sage
 
     if not dossier_txt.exists():
         print(f"Le dossier d’en-têtes n’existe pas : {dossier_txt}")

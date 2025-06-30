@@ -9,13 +9,13 @@ import os
 # --------------------------------------------------------------------
 # Importation des chemins absolus depuis outils.chemins
 # --------------------------------------------------------------------
-from src.outils.chemins import racine_projet, dossier_csv_extraits
+from src.outils.chemins import racine_projet, dossier_datalake_raw_sage
 
 # --------------------------------------------------------------------
 # Paramètres utilisateur basés sur des chemins absolus
 # --------------------------------------------------------------------
 chemin_fichier_access = racine_projet / "db_sage_access" / "tables_sage_hyperix.accdb"
-dossier_sortie_csv   = dossier_csv_extraits
+dossier_sortie_csv   = dossier_datalake_raw_sage
 
 # --------------------------------------------------------------------
 # Création du dossier de sortie s'il n'existe pas

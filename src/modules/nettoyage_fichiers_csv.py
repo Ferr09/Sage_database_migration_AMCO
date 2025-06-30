@@ -9,16 +9,16 @@ import os
 # --------------------------------------------------------------------
 # Importation des chemins absolus depuis chemins.py
 # --------------------------------------------------------------------
-from src.outils.chemins import dossier_csv_extraits, dossier_xlsx_propres
+from src.outils.chemins import dossier_datalake_raw_sage, dossier_datalake_staging_sage
 
 # --------------------------------------------------------------------
 # Vérification du dossier source et création du dossier de sortie
 # --------------------------------------------------------------------
-if not dossier_csv_extraits.is_dir():
-    raise FileNotFoundError(f"Le dossier source n'existe pas : {dossier_csv_extraits}")
+if not dossier_datalake_raw_sage.is_dir():
+    raise FileNotFoundError(f"Le dossier source n'existe pas : {dossier_datalake_raw_sage}")
 
 # Création du dossier de sortie s’il n’existe pas
-dossier_xlsx_propres.mkdir(parents=True, exist_ok=True)
+dossier_datalake_staging_sage.mkdir(parents=True, exist_ok=True)
 
 # --------------------------------------------------------------------
 # Configuration facultative (types, monnaies, dtype personnalisés)
@@ -118,7 +118,7 @@ def nettoyer_et_exporter_csv(chemin_csv: Path, nom_table: str):
             return
 
         # Export vers Excel
-        chemin_excel = dossier_xlsx_propres / f"{nom_table}_propre.xlsx"
+        chemin_excel = dossier_datalake_staging_sage / f"{nom_table}_propre.xlsx"
         with pd.ExcelWriter(chemin_excel, engine="xlsxwriter") as writer:
             df_clean.to_excel(writer, index=False, sheet_name="Données")
             workbook = writer.book
@@ -143,8 +143,8 @@ def nettoyer_et_exporter_csv(chemin_csv: Path, nom_table: str):
 # Exécution pour tous les CSV du dossier source
 # --------------------------------------------------------------------
 def main():
-    fichiers = [f for f in dossier_csv_extraits.iterdir() if f.suffix.lower() == ".csv"]
-    print(f"Détection de {len(fichiers)} fichiers CSV dans {dossier_csv_extraits}")
+    fichiers = [f for f in dossier_datalake_raw_sage.iterdir() if f.suffix.lower() == ".csv"]
+    print(f"Détection de {len(fichiers)} fichiers CSV dans {dossier_datalake_raw_sage}")
 
     for fichier in fichiers:
         nom_table = fichier.stem

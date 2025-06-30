@@ -27,11 +27,14 @@ chemin_makefile = racine_projet / "Makefile"
 # 3.2 Dossier contenant les bases Access (.accdb)
 dossier_db_access = racine_projet / "db_sage_access"
 
-# 3.3 Dossiers « extraits » pour CSV et XLSX
-dossier_extraits = racine_projet / "extraits"
-dossier_csv_extraits = dossier_extraits / "csv_extraits"
-dossier_xlsx_propres = dossier_extraits / "xlsx_propres"
-dossier_txt_entetes = dossier_extraits / "entetes_csv"
+#3.3 Dossier contenant les fichiers de base de données du Datalake
+dossier_datalake = racine_projet / "data_lake"
+dossier_datalake_raw = dossier_datalake / "raw"  # pour les données brutes
+dossier_datalake_raw_sage = dossier_datalake_raw / "sage"  # pour les données brutes
+dossier_datalake_raw_proalpha = dossier_datalake_raw / "proalpha"  # pour les données brutes ProAlpha
+dossier_datalake_entetes = dossier_datalake_raw_sage / "entetes_csv"  # pour les en-têtes extraites
+dossier_datalake_staging_sage = dossier_datalake / "staging"  # pour les données intermédiaires
+dossier_datalake_processed = dossier_datalake / "processed"  # pour les données traitées
 
 # 3.3.1 Dossier contenant les fichiers des bibliothèques requises pour l'environnement virtuel python 
 dossier_requirements = racine_projet / "requirements"
@@ -74,9 +77,9 @@ def creer_dossier_s_il_n_existe_pas(chemin: Path) -> None:
 
 # 5. Création automatique des répertoires de sortie la première fois
 #    (utile pour éviter les erreurs si les dossiers n’existent pas)
-creer_dossier_s_il_n_existe_pas(dossier_csv_extraits)
-creer_dossier_s_il_n_existe_pas(dossier_xlsx_propres)
-creer_dossier_s_il_n_existe_pas(dossier_txt_entetes)
+creer_dossier_s_il_n_existe_pas(dossier_datalake_raw_sage)
+creer_dossier_s_il_n_existe_pas(dossier_datalake_staging_sage)
+creer_dossier_s_il_n_existe_pas(dossier_datalake_entetes)
 
 # 6. (Optionnel) Pour le débogage : afficher toutes les routes définies
 if __name__ == "__main__":
@@ -88,9 +91,9 @@ if __name__ == "__main__":
     print("requirements_mysql.txt     :", chemin_requirements_mysql)
     print("requirements_postgresql.txt:", chemin_requirements_postgresql)
     print("db_sage_access             :", dossier_db_access)
-    print("extraits/csv_extraits      :", dossier_csv_extraits)
-    print("extraits/xlsx_propres      :", dossier_xlsx_propres)
-    print("extraits/entetes_csv       :", dossier_txt_entetes)
+    print("extraits/csv_extraits      :", dossier_datalake_raw_sage)
+    print("extraits/xlsx_propres      :", dossier_datalake_staging_sage)
+    print("extraits/entetes_csv       :", dossier_datalake_entetes)
     print("src/modules                :", dossier_modules)
     print("src/outils                 :", dossier_outils)
     print("src/db                     :", dossier_db)

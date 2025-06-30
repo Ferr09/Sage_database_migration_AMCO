@@ -23,12 +23,12 @@ from contextlib import contextmanager
 # Importations depuis les modules locaux du projet
 try:
     from src.models.tables import metadata_ventes, metadata_achats
-    from src.outils.chemins import dossier_config, dossier_xlsx_propres
+    from src.outils.chemins import dossier_config, dossier_datalake_staging_sage
 except ImportError:
     print("AVERTISSEMENT: Impossible d'importer les modules locaux. Assurez-vous que le script est exécuté depuis la racine du projet.")
     # On définit des chemins par défaut pour que le script puisse s'exécuter
     dossier_config = Path('./config')
-    dossier_xlsx_propres = Path('./donnees_propres')
+    dossier_datalake_staging_sage = Path('./donnees_propres')
 
 
 @contextmanager
@@ -246,8 +246,8 @@ if __name__ == "__main__":
 
     files_v = {"famille_ventes": "F_FAMILLE_propre.xlsx", "articles_ventes": "F_ARTICLE_propre.xlsx", "comptet_ventes": "F_COMPTET_propre.xlsx", "docligne_ventes": "F_DOCLIGNE_propre.xlsx"}
     files_a = {"famille_achats": "F_FAMILLE_propre.xlsx", "articles_achats": "F_ARTICLE_propre.xlsx", "comptet_achats": "F_COMPTET_propre.xlsx", "fournisseur_achats": "F_ARTFOURNISS_propre.xlsx", "docligne_achats": "F_DOCLIGNE_propre.xlsx"}
-    tv = charger_fichiers_excel(dossier_xlsx_propres, files_v)
-    ta = charger_fichiers_excel(dossier_xlsx_propres, files_a)
+    tv = charger_fichiers_excel(dossier_datalake_staging_sage, files_v)
+    ta = charger_fichiers_excel(dossier_datalake_staging_sage, files_a)
 
     try:
         if db_type == "mysql":
