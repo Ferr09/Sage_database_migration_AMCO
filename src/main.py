@@ -30,7 +30,7 @@ from src.outils.chemins import (
     dossier_datalake_staging,
     dossier_datalake_processed,
     chemin_requirements_extraction,
-    chemin_requirements_postgresql
+    chemin_requirements_supabase
 )
 
 # -----------------------------------------------------------------------------
@@ -122,7 +122,6 @@ def check_access_file():
 def etl_complete():
     extraction()
     transformation()
-    structuration()
     chargement()
 
 def extraction():
@@ -137,23 +136,18 @@ def transformation():
     print("=== Transformation ===")
     run_module("src.staging.nettoyage_fichiers_bruts_sage")
     run_module("src.chargement.vers_csv")
-    run_module("src.chargement.structuration_3fn")
-
-def structuration():
-    print("=== Structuration 3FN interne ===")
-    run_module("src.chargement.structuration_3fn")
 
 def chargement():
     print("=== Chargement en Supabase/PostgreSQL ===")
     cfg = load_supabase_config()
-    install_requirements(chemin_requirements_postgresql)
+    install_requirements(chemin_requirements_supabase)
     # On transmet les identifiants en variable d'env pour le module charger_supabase
     os.environ["SUPABASE_HOST"]     = cfg["db_host"]
     os.environ["SUPABASE_PORT"]     = cfg["db_port"]
     os.environ["SUPABASE_DB"]       = cfg["db_name"]
     os.environ["SUPABASE_USER"]     = cfg["db_user"]
     os.environ["SUPABASE_PASSWORD"] = cfg["db_password"]
-    run_module("src.chargement.charger_supabase")
+    run_module("src.chargement.vers_bdd")
 
 # -----------------------------------------------------------------------------
 # Main interactif
