@@ -1,50 +1,36 @@
-# Projet Python – Extraction Access → PostgreSQL
+# Projet Python – Pipeline ETL vers Supabase (PostgreSQL)
 
-Ce projet Python permet d'extraire des données depuis une base Microsoft Access (.accdb), de les transformer, et de les charger dans une base de données PostgreSQL, dans un environnement isolé et reproductible.
+Ce projet fournit un **pipeline interactif** pour extraire des données depuis une base Access, transformer et structurer en 3FN, puis charger proprement dans Supabase (PostgreSQL).
 
 ## 📌 Objectifs
 
-- Extraire des données depuis Access
-- Traiter et transformer les données (nettoyage, normalisation)
-- Les injecter dans une base PostgreSQL
-- Fournir une structure de projet claire et portable
+1. **Extraction** : lire `.accdb` via `pyodbc` → CSV bruts  
+2. **Transformation** : nettoyage / staging / création d’une table générale  
+3. **Structuration 3FN** : décomposer la table générale en tables normalisées  
+4. **Chargement** : importer les CSV 3FN dans Supabase/PostgreSQL  
 
-## 🛠 Technologies utilisées
+## 🛠 Technologies
 
-- Python 3
-- `pyodbc` (connexion Access)
-- `psycopg2` (connexion PostgreSQL)
-- PostgreSQL
-- pgAdmin 4 (interface d’administration de la base PostgreSQL)
-- Git + Git Bash (sous Windows)
-- Environnement virtuel `.venv`
-- Fichiers de configuration `.json`
+- Python ≥ 3.8  
+- `pyodbc`, `pandas`  
+- `sqlalchemy` + `psycopg2`  
+- Supabase CLI / interface  
+- Environnement virtuel `.venv`  
+- Git  
 
 ## ⚙️ Prérequis
 
-- Python ≥ 3.8
-- Git
-- `make` (Linux/macOS ou Git Bash sous Windows)
-- PostgreSQL installé et accessible
-- pgAdmin installé et configuré
-- Fichier `.accdb` (base Access d'origine)
+- Python 3.8+  
+- Git  
+- Pilote Access Database Engine (64 bits si Python 64 bits)  
+- Compte Supabase/PostgreSQL opérationnel  
 
+## 🚀 Installation rapide
 
-Pour exécuter ce projet, vous devez avoir **Python 3.8 ou supérieur installé** sur votre machine.
-
-### 🔧 Vérification
-
-Dans un terminal, exécutez :
-
-```bash
-python --version
-```
-
-ou
-
-```bash
-python3 --version
-```
+1. **Cloner le projet**  
+   ```bash
+   git clone https://github.com/…/mon_projet.git
+   cd mon_projet
 
 
 ### 📥 Installation de Python
@@ -63,6 +49,21 @@ python3 --version
       ```bash
       python --version  # doit renvoyer Python 3.8.14
       ```
+
+### 🔧 Vérification
+
+Dans un terminal, exécutez :
+
+```bash
+python --version
+```
+
+ou
+
+```bash
+python3 --version
+```
+
 
 4. Créez un environnement virtuel et installez les dépendances :  
    ```bash

@@ -67,12 +67,19 @@ def show_readme():
     print("="*60 + "\n")
     input("Appuyez sur Entrée pour continuer…")
 
-def ensure_postgres_config():
-    cfg_file = dossier_config / "postgres_config.json"
+def ensure_supabase_config():
+    """
+    Vérifie l'existence de supabase_config.json.
+    Si présent, demande si on réutilise ; sinon, recrée.
+    Si absent, crée le fichier en demandant les infos.
+    """
+    cfg_file = dossier_config / "supabase_config.json"
+    dossier_config.mkdir(exist_ok=True)
     if cfg_file.exists():
-        print(f"{cfg_file.name} déjà présent.")
-        if input("Recréer ? (o/n) : ").strip().lower() not in ("o","oui"):
+        print(f"⚙️  Fichier {cfg_file.name} détecté.")
+        if input("Voulez-vous l’utiliser ? (o/n) : ").strip().lower() in ("o","oui"):
             return
+        print(f"Suppression de l’ancien {cfg_file.name}…")
         cfg_file.unlink()
     # création du fichier
     print("Configuration Supabase/PostgreSQL :")
@@ -80,13 +87,19 @@ def ensure_postgres_config():
         "db_host":   input("Hôte (ex : db.supabase.co) : ").strip(),
         "db_port":   input("Port (par défaut 5432) : ").strip() or "5432",
         "db_name":   input("Nom de la base : ").strip(),
-        "db_user":   input("Utilisateur : ").strip(),
+        "db_user":   input("Utilisateur (developer) : ").strip(),
         "db_password": getpass.getpass("Mot de passe : ").strip()
     }
-    dossier_config.mkdir(exist_ok=True)
     with open(cfg_file, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=4)
-    print(f"{cfg_file.name} créé.")
+    print(f"✅  {cfg_file.name} créé.")
+
+def load_supabase_config():
+    cfg_file = dossier_config / "supabase_config.json"
+    if not cfg_file.exists():
+        ensure_supabase_config()
+    with open(cfg_file, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 def check_access_file():
     cand = list(dossier_db_access.glob("*.accdb"))
@@ -127,16 +140,20 @@ def transformation():
     run_module("src.chargement.structuration_3fn")
 
 def structuration():
-    # cette étape est déjà incluse dans transformation(),
-    # mais si besoin de la séparer, on la conserve
     print("=== Structuration 3FN interne ===")
     run_module("src.chargement.structuration_3fn")
 
 def chargement():
     print("=== Chargement en Supabase/PostgreSQL ===")
-    ensure_postgres_config()
+    cfg = load_supabase_config()
     install_requirements(chemin_requirements_postgresql)
-    run_module("src.chargement.charger_supabase", ["--db-type", "postgresql"])
+    # On transmet les identifiants en variable d'env pour le module charger_supabase
+    os.environ["SUPABASE_HOST"]     = cfg["db_host"]
+    os.environ["SUPABASE_PORT"]     = cfg["db_port"]
+    os.environ["SUPABASE_DB"]       = cfg["db_name"]
+    os.environ["SUPABASE_USER"]     = cfg["db_user"]
+    os.environ["SUPABASE_PASSWORD"] = cfg["db_password"]
+    run_module("src.chargement.charger_supabase")
 
 # -----------------------------------------------------------------------------
 # Main interactif
@@ -179,4 +196,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
