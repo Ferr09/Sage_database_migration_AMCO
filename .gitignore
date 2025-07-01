@@ -34,3 +34,6 @@ db_sage_access/tables_access.txt
 
 # Fichiers de statistiques
 /statistiques/
+
+# Dossier de tests
+/tests/
