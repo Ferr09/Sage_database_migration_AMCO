@@ -55,8 +55,8 @@ famille_ventes = Table(
     Column("FA_INTITULE",    VarCharOrText(255), nullable=False, quote=True) # Préservé
 )
 
-articles_ventes = Table(
-    "ARTICLES", metadata_ventes,
+article_ventes = Table(
+    "ARTICLE", metadata_ventes,
     Column("AR_REF",     VarCharOrText(50), primary_key=True, quote=True), # Préservé
     Column("AR_DESIGN",  VarCharOrText(255), quote=True),                  # Préservé
     Column("AR_PRIXACH", VarCharOrText(), quote=True), # Modifié en texte
@@ -179,7 +179,7 @@ docligne_ventes = Table(
     Column("AC_REFCLIENT", VarCharOrText(255), quote=True),           # Préservé
     Column("AG_NO1", VarCharOrText(), quote=True),
     Column("AG_NO2", VarCharOrText(), quote=True),
-    Column("AR_REF", VarCharOrText(50), ForeignKey("ARTICLES.AR_REF"), quote=True), # Préservé
+    Column("AR_REF", VarCharOrText(50), ForeignKey("ARTICLE.AR_REF"), quote=True), # Préservé
     Column("AR_REFCOMPOSE", VarCharOrText(), quote=True),
     Column("CA_NUM", VarCharOrText(), quote=True),
     Column("CO_NO", VarCharOrText(), quote=True),
@@ -272,7 +272,7 @@ docligne_ventes = Table(
 # Création des tables Achats (réutilisation des définitions modifiées)
 # --------------------------------------------------------------------
 famille_achats = famille_ventes.to_metadata(metadata_achats)
-articles_achats = articles_ventes.to_metadata(metadata_achats)
+article_achats = article_ventes.to_metadata(metadata_achats)
 comptet_achats = comptet_ventes.to_metadata(metadata_achats)
 
 fournisseur_achats = Table(
@@ -297,7 +297,7 @@ fournisseur_achats = Table(
     Column("AF_REMISENOUV", VarCharOrText(), quote=True),
     Column("AF_TYPEREM", VarCharOrText(), quote=True),
     Column("AF_UNITE", VarCharOrText(), quote=True),
-    Column("AR_REF", VarCharOrText(50), ForeignKey("ARTICLES.AR_REF"), quote=True), # Préservé
+    Column("AR_REF", VarCharOrText(50), ForeignKey("ARTICLE.AR_REF"), quote=True), # Préservé
     Column("CT_NUM", VarCharOrText(), quote=True),
     Column("EG_CHAMP", VarCharOrText(), quote=True),
     Column("INT_CHAMP", VarCharOrText(), quote=True),

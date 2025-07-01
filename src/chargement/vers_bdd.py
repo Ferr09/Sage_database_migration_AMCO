@@ -9,8 +9,10 @@ vers une base de données PostgreSQL ou MySQL.
 import os
 import pandas as pd
 import MySQLdb
+import sys
 import json
 from pathlib import Path
+import utils
 import importlib.util
 import argparse
 from sqlalchemy import (
@@ -22,13 +24,41 @@ from contextlib import contextmanager
 
 # Importations depuis les modules locaux du projet
 try:
-    from src.models.tables import metadata_ventes, metadata_achats
-    from src.outils.chemins import dossier_config, dossier_datalake_staging_sage
+    from src.outils.chemins import (
+        dossier_datalake_staging_sage,
+        dossier_datalake_processed
+    )
+    from src.models.tables import metadata_ventes
+
 except ImportError:
-    print("AVERTISSEMENT: Impossible d'importer les modules locaux. Assurez-vous que le script est exécuté depuis la racine du projet.")
-    # On définit des chemins par défaut pour que le script puisse s'exécuter
-    dossier_config = Path('./config')
-    dossier_datalake_staging_sage = Path('./donnees_propres')
+    print("AVERTISSEMENT: Impossible d'importer les modules locaux. "
+          "Assurez-vous que le script est exécuté depuis la racine du projet.")
+    # Définir des chemins par défaut
+    projet_root = Path(__file__).resolve().parents[2]
+    dossier_datalake_staging_sage = projet_root / "data_lake" / "staging" / "sage"
+    dossier_datalake_processed      = projet_root / "data_lake" / "processed"
+    # Dummy metadata minimaliste pour éviter les erreurs
+    from sqlalchemy import MetaData, Table, Column, Integer, String
+    metadata_ventes = MetaData()
+    # on crée une table DOCLIGNE de secours
+    Table("DOCLIGNE", metadata_ventes,
+          Column("DL_NO", Integer, primary_key=True),
+          Column("CT_NUM", String),
+          Column("AR_REF", String))
+    # Logger basique
+
+    import logging
+    def get_logger(name):
+        lg = logging.getLogger(name)
+        if not lg.handlers:
+            h = logging.StreamHandler(sys.stdout)
+            fmt = "%(asctime)s — %(name)s — %(levelname)s — %(message)s"
+            h.setFormatter(logging.Formatter(fmt))
+            lg.addHandler(h)
+            lg.setLevel(logging.INFO)
+        return lg
+
+logger = get_logger(__name__)
 
 
 @contextmanager
@@ -244,8 +274,8 @@ if __name__ == "__main__":
         metadata_ventes.create_all(mv); metadata_achats.create_all(ma)
     print("Les tables ont été créées avec succès.")
 
-    files_v = {"famille_ventes": "F_FAMILLE_propre.xlsx", "articles_ventes": "F_ARTICLE_propre.xlsx", "comptet_ventes": "F_COMPTET_propre.xlsx", "docligne_ventes": "F_DOCLIGNE_propre.xlsx"}
-    files_a = {"famille_achats": "F_FAMILLE_propre.xlsx", "articles_achats": "F_ARTICLE_propre.xlsx", "comptet_achats": "F_COMPTET_propre.xlsx", "fournisseur_achats": "F_ARTFOURNISS_propre.xlsx", "docligne_achats": "F_DOCLIGNE_propre.xlsx"}
+    files_v = {"famille_ventes": "F_FAMILLE_staging.xlsx", "articles_ventes": "F_ARTICLE_staging.xlsx", "comptet_ventes": "F_COMPTET_staging.xlsx", "docligne_ventes": "F_DOCLIGNE_staging.xlsx"}
+    files_a = {"famille_achats": "F_FAMILLE_staging.xlsx", "articles_achats": "F_ARTICLE_staging.xlsx", "comptet_achats": "F_COMPTET_staging.xlsx", "fournisseur_achats": "F_ARTFOURNISS_staging.xlsx", "docligne_achats": "F_DOCLIGNE_staging.xlsx"}
     tv = charger_fichiers_excel(dossier_datalake_staging_sage, files_v)
     ta = charger_fichiers_excel(dossier_datalake_staging_sage, files_a)
 

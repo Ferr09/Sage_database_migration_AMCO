@@ -39,25 +39,25 @@ taux_vides   = (nb_vides / total_tables * 100) if total_tables else 0.0
 # 4. Définir les tables et colonnes représentatives
 colonnes_representatives = {
     "VENTES": {
-        "F_DOCLIGNE_propre": [
+        "F_DOCLIGNE_staging": [
             "DL_NO", "AC_REFCLIENT", "AR_REF", "CT_NUM",
             "DL_PIECEBL", "DL_DATEBL", "DL_DESIGN",
             "DL_QTE", "DL_PRIXUNITAIRE", "DL_MONTANTHT", "DO_DATE"
         ],
-        "F_FAMILLE_propre": ["FA_CODEFAMILLE", "FA_CENTRAL", "FA_INTITULE"],
-        "F_COMPTET_propre": ["CT_NUM", "CT_INTITULE"],
-        "F_ARTICLE_propre": ["AR_REF", "FA_CODEFAMILLE"]
+        "F_FAMILLE_staging": ["FA_CODEFAMILLE", "FA_CENTRAL", "FA_INTITULE"],
+        "F_COMPTET_staging": ["CT_NUM", "CT_INTITULE"],
+        "F_ARTICLE_staging": ["AR_REF", "FA_CODEFAMILLE"]
     },
     "ACHATS": {
-        "F_DOCLIGNE_propre": [
+        "F_DOCLIGNE_staging": [
             "DL_NO", "AF_REFFOURNISS", "AR_REF", "CT_NUM",
             "DL_PIECEBC", "DL_DATEBL", "AC_REFCLIENT",
             "DL_DESIGN", "DL_QTE", "DL_PRIXUNITAIRE", "DL_MONTANTHT", "DO_DATE"
         ],
-        "F_ARTFOURNISS_propre": ["AF_REFFOURNISS", "AR_REF"],
-        "F_FAMILLE_propre": ["FA_CODEFAMILLE", "FA_CENTRAL", "FA_INTITULE"],
-        "F_COMPTET_propre": ["CT_NUM", "CT_INTITULE"],
-        "F_ARTICLE_propre": ["AR_REF", "FA_CODEFAMILLE"]
+        "F_ARTFOURNISS_staging": ["AF_REFFOURNISS", "AR_REF"],
+        "F_FAMILLE_staging": ["FA_CODEFAMILLE", "FA_CENTRAL", "FA_INTITULE"],
+        "F_COMPTET_staging": ["CT_NUM", "CT_INTITULE"],
+        "F_ARTICLE_staging": ["AR_REF", "FA_CODEFAMILLE"]
     }
 }
 

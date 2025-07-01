@@ -6,7 +6,7 @@ import matplotlib.cm as cm
 import networkx as nx
 
 from src.outils.chemins import (
-    dossier_datalake_entetes,
+    dossier_entetes_sage,
     dossier_tables_statistiques
 )
 
@@ -33,7 +33,7 @@ def charger_entetes(dossier, tables_cibles):
                     colonnes_par_table[nom_table] = colonnes
     return colonnes_par_table
 
-colonnes_par_table = charger_entetes(dossier_datalake_entetes, tables_importantes)
+colonnes_par_table = charger_entetes(dossier_entetes_sage, tables_importantes)
 
 # ==============================================================================
 # 3) CLASSIFICATION DES TABLES PAR FAMILLE (PRIORISATION DES TABLES)

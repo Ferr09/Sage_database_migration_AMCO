@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+Module de nettoyage des CSV bruts Sage et export vers CSV staging.
+Au lieu d’Excel, on génère <nom_table>_staging.csv dans data_lake/staging/sage/.
+"""
+
 import re
 import pandas as pd
 from pathlib import Path
@@ -9,7 +14,16 @@ import os
 # --------------------------------------------------------------------
 # Importation des chemins absolus depuis chemins.py
 # --------------------------------------------------------------------
-from src.outils.chemins import dossier_datalake_raw_sage, dossier_datalake_staging_sage
+try:
+    from src.outils.chemins import (
+        dossier_datalake_raw_sage,
+        dossier_datalake_staging_sage
+    )
+except ImportError:
+    # Fallback si exécuté hors du contexte src/
+    projet_root = Path(__file__).resolve().parents[2]
+    dossier_datalake_raw_sage     = projet_root / "data_lake" / "raw"     / "sage"
+    dossier_datalake_staging_sage = projet_root / "data_lake" / "staging" / "sage"
 
 # --------------------------------------------------------------------
 # Vérification du dossier source et création du dossier de sortie
@@ -17,11 +31,10 @@ from src.outils.chemins import dossier_datalake_raw_sage, dossier_datalake_stagi
 if not dossier_datalake_raw_sage.is_dir():
     raise FileNotFoundError(f"Le dossier source n'existe pas : {dossier_datalake_raw_sage}")
 
-# Création du dossier de sortie s’il n’existe pas
 dossier_datalake_staging_sage.mkdir(parents=True, exist_ok=True)
 
 # --------------------------------------------------------------------
-# Configuration facultative (types, monnaies, dtype personnalisés)
+# Configuration des conversions de types et colonnes spécifiques
 # --------------------------------------------------------------------
 types_tables = {
     "F_DOCENTETE": {
@@ -51,37 +64,26 @@ dtype_tables = {
     }
 }
 
-def convertir_col_excel(index):
-    """
-    Convertit un index de colonne (0-based) en lettre Excel (A, B, ..., AA, AB...)
-    """
-    result = ""
-    while index >= 0:
-        result = chr(index % 26 + ord('A')) + result
-        index = index // 26 - 1
-    return result
-
 # --------------------------------------------------------------------
-# Fonction principale de nettoyage et export
+# Fonction principale de nettoyage et export vers CSV
 # --------------------------------------------------------------------
 def nettoyer_et_exporter_csv(chemin_csv: Path, nom_table: str):
     try:
-        # Lecture du fichier CSV
+        # Lecture du fichier CSV brut
         dtype = dtype_tables.get(nom_table, None)
         df = pd.read_csv(chemin_csv, encoding="utf-8-sig", dtype=dtype, low_memory=False)
 
-        # Nettoyage : suppression des lignes entièrement vides ou nulles/0
+        # Suppression des lignes vides ou nulles
         df_clean = df.dropna(how='all')
         df_clean = df_clean.loc[~(df_clean.isna() | (df_clean == 0)).all(axis=1)]
 
-        # Cas particulier : suppression des lignes sans AF_REFFOURNISS pour F_ARTFOURNISS
-        if nom_table == "F_ARTFOURNISS":
-            before = len(df_clean)
+        # Cas particulier : F_ARTFOURNISS sans AF_REFFOURNISS
+        if nom_table == "F_ARTFOURNISS" and "AF_REFFOURNISS" in df_clean.columns:
+            avant = len(df_clean)
             df_clean = df_clean[df_clean["AF_REFFOURNISS"].notna()]
-            removed = before - len(df_clean)
-            print(f"{nom_table} : {removed} ligne(s) sans AF_REFFOURNISS supprimée(s)")
+            print(f"{nom_table} : {avant - len(df_clean)} ligne(s) sans AF_REFFOURNISS supprimée(s)")
 
-        # Cas particulier : F_DOCLIGNE extraction du n° de BL
+        # Cas particulier : extraction de BL pour F_DOCLIGNE
         if nom_table == "F_DOCLIGNE":
             if "DL_PIECEBL" in df_clean.columns and "DL_DESIGN" in df_clean.columns:
                 def extraire_bl(row):
@@ -89,63 +91,49 @@ def nettoyer_et_exporter_csv(chemin_csv: Path, nom_table: str):
                     texte = str(row["DL_DESIGN"]).replace('\xa0', ' ')
                     texte = re.sub(r"\s+", " ", texte).strip()
                     if pd.isna(val) or str(val).strip() == "":
-                        match = re.search(r"LIVREE?S?\s+PAR\s+BL\s*(?:N°?|N)?\s*(\d+)", texte, re.IGNORECASE)
+                        match = re.search(r"LIVREE?S?\s+PAR\s+BL\s*(?:N°?|N)?\s*(\d+)",
+                                          texte, re.IGNORECASE)
                         if match:
                             return match.group(1)
                     return val
 
                 ancienne = df_clean["DL_PIECEBL"].copy()
                 df_clean["DL_PIECEBL"] = df_clean.apply(extraire_bl, axis=1)
-                lignes_modifiees = (ancienne.isna() | (ancienne == "")) & (ancienne != df_clean["DL_PIECEBL"])
-                print(f"🔧 {nom_table} : {lignes_modifiees.sum()} ligne(s) mises à jour automatiquement dans DL_PIECEBL")
+                modif = ((ancienne.isna() | (ancienne == "")) &
+                         (ancienne != df_clean["DL_PIECEBL"])).sum()
+                print(f"{nom_table} : {modif} ligne(s) mise(s) à jour dans DL_PIECEBL")
 
-        # Application des types si définis
-        types = types_tables.get(nom_table, None)
-        if types:
-            for col, dtype in types.items():
-                if col in df_clean.columns:
-                    try:
-                        if dtype == "datetime":
-                            df_clean[col] = pd.to_datetime(df_clean[col], errors="coerce")
-                        else:
-                            df_clean[col] = df_clean[col].astype(dtype)
-                    except Exception as e:
-                        print(f"Erreur de conversion dans {nom_table}.{col} : {e}")
+        # Conversion des types définis
+        conversions = types_tables.get(nom_table, {})
+        for col, dtype in conversions.items():
+            if col in df_clean.columns:
+                try:
+                    if dtype == "datetime":
+                        df_clean[col] = pd.to_datetime(df_clean[col], errors="coerce")
+                    else:
+                        df_clean[col] = df_clean[col].astype(dtype)
+                except Exception as e:
+                    print(f"Erreur conversion {nom_table}.{col} : {e}")
 
-        # Ne rien exporter si aucune ligne n'est présente après nettoyage
-        if df_clean.shape[0] == 0:
+        # Si vide après nettoyage, on ignore
+        if df_clean.empty:
             print(f"Ignoré : {nom_table} (aucune ligne après nettoyage)")
             return
 
-        # Export vers Excel
-        chemin_excel = dossier_datalake_staging_sage / f"{nom_table}_propre.xlsx"
-        with pd.ExcelWriter(chemin_excel, engine="xlsxwriter") as writer:
-            df_clean.to_excel(writer, index=False, sheet_name="Données")
-            workbook = writer.book
-            worksheet = writer.sheets["Données"]
-
-            # Format monétaire si applicable
-            colonnes_monnaie = colonnes_monnaie_tables.get(nom_table, [])
-            if colonnes_monnaie:
-                format_monnaie = workbook.add_format({'num_format': '#,##0.00 €'})
-                for col in colonnes_monnaie:
-                    if col in df_clean.columns:
-                        idx = df_clean.columns.get_loc(col)
-                        excel_col = convertir_col_excel(idx)
-                        worksheet.set_column(f"{excel_col}:{excel_col}", 18, format_monnaie)
-
-        print(f"Exporté : {nom_table} ({len(df_clean)} lignes)")
+        # Export vers CSV staging
+        fichier_sortie = dossier_datalake_staging_sage / f"{nom_table}_staging.csv"
+        df_clean.to_csv(fichier_sortie, index=False, encoding="utf-8-sig")
+        print(f"Exporté : {nom_table} → {fichier_sortie} ({len(df_clean)} lignes)")
 
     except Exception as e:
         print(f"Erreur pour {nom_table} : {e}")
 
 # --------------------------------------------------------------------
-# Exécution pour tous les CSV du dossier source
+# Exécution pour tous les CSV bruts du dossier raw/sage
 # --------------------------------------------------------------------
 def main():
     fichiers = [f for f in dossier_datalake_raw_sage.iterdir() if f.suffix.lower() == ".csv"]
-    print(f"Détection de {len(fichiers)} fichiers CSV dans {dossier_datalake_raw_sage}")
-
+    print(f"Détection de {len(fichiers)} fichiers CSV bruts dans {dossier_datalake_raw_sage}")
     for fichier in fichiers:
         nom_table = fichier.stem
         nettoyer_et_exporter_csv(fichier, nom_table)

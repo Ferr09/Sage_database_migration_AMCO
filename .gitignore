@@ -29,8 +29,8 @@ db_sage_access/tables_access.txt
 .vscode/
 .idea/
 
-# Fichiers de sauvegarde
-extraits/
+# Dossier data_lake contenant les données extraits
+/data_lake/
 
 # Fichiers de statistiques
-statistiques/
+/statistiques/

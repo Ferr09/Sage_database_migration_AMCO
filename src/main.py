@@ -18,7 +18,7 @@ from pathlib import Path
 from src.outils.chemins import (
     racine_projet,
     dossier_config,
-    dossier_modules,
+    dossier_extraction,
     dossier_outils,
     dossier_db_access,
     dossier_datalake_raw_sage,
@@ -306,13 +306,13 @@ def main():
         print("Lancement du module : src.modules.extraction_complete_access…")
         lancer_module([
             sys.executable,
-            "-m", "src.modules.extraction_complete_access"
+            "-m", "src.extraction.extraction_complete_access"
         ])
 
         print("Lancement du module : src.modules.extraction_entetes…")
         lancer_module([
             sys.executable,
-            "-m", "src.modules.extraction_entetes"
+            "-m", "src.extraction.extraction_entetes"
         ])
 
         print("Lancement du module : src.outils.generer_statistiques_tables…")
@@ -321,10 +321,10 @@ def main():
             "-m", "src.outils.generer_statistiques_tables"
         ])
 
-        print("Lancement du module : src.modules.nettoyage_fichiers_csv…")
+        print("Lancement du module : src.modules.nettoyage_fichiers_bruts_sage…")
         lancer_module([
             sys.executable,
-            "-m", "src.modules.nettoyage_fichiers_csv"
+            "-m", "src.staging.nettoyage_fichiers_bruts_sage"
         ])
 
     # ------------------------------------------------------------
@@ -339,9 +339,9 @@ def main():
         # 5.a) Installer seulement les dépendances de chargement
         installer_requirements_chargement(db_type)
 
-        # 5.b) Lancer le module de construction de la BDD en MODE `-m src.modules.construction_bdd_sql`
-        print(f"Lancement du module : src.modules.construction_bdd_sql – db_type = {db_type}")
-        module_cci = "src.modules.construction_bdd_sql"
+        # 5.b) Lancer le module de construction de la BDD en MODE `-m src.modules.vers_bdd`
+        print(f"Lancement du module : src.modules.vers_bdd – db_type = {db_type}")
+        module_cci = "src.chargement.vers_bdd"
         try:
             lancer_module([
                 sys.executable,

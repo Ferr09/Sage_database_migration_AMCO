@@ -216,7 +216,7 @@ Modules exécutés, dans l’ordre :
 - Sage/src/modules/extraction_complete_fichiers_csv.py
 - Sage/src/modules/extraction_entetes.py
 - Sage/src/outils/generer_statistiques_tables.py
-- Sage/src/modules/nettoyage_fichiers_csv.py
+- Sage/src/modules/nettoyage_fichiers_bruts_sage.py
 
 ### Option 2 – Injection PostgreSQL
 
@@ -233,7 +233,7 @@ Crée ou met à jour config.json en demandant :
 - Utilisateur
 - Mot de passe
 
-Exécute construction_bdd_sql.py pour insérer les données
+Exécute vers_bdd.py pour insérer les données
 
 #### Annulation : à tout moment lors d’une invite, tapez :
 `sortir`

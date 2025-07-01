@@ -30,10 +30,11 @@ dossier_db_access = racine_projet / "db_sage_access"
 #3.3 Dossier contenant les fichiers de base de données du Datalake
 dossier_datalake = racine_projet / "data_lake"
 dossier_datalake_raw = dossier_datalake / "raw"  # pour les données brutes
-dossier_datalake_raw_sage = dossier_datalake_raw / "sage"  # pour les données brutes
+dossier_datalake_raw_sage = dossier_datalake_raw / "sage"  # pour les données brutes Sage
 dossier_datalake_raw_proalpha = dossier_datalake_raw / "proalpha"  # pour les données brutes ProAlpha
-dossier_datalake_entetes = dossier_datalake_raw_sage / "entetes_csv"  # pour les en-têtes extraites
-dossier_datalake_staging_sage = dossier_datalake / "staging"  # pour les données intermédiaires
+dossier_datalake_staging = dossier_datalake / "staging"  # pour les données intermédiaires
+dossier_datalake_staging_sage = dossier_datalake_staging / "sage"  # pour les données intermédiaires de Sage    
+dossier_datalake_staging_proalpha = dossier_datalake_staging / "proalpha"  # pour les données intermédiaires de ProAlpha
 dossier_datalake_processed = dossier_datalake / "processed"  # pour les données traitées
 
 # 3.3.1 Dossier contenant les fichiers des bibliothèques requises pour l'environnement virtuel python 
@@ -46,21 +47,29 @@ chemin_requirements_postgresql = dossier_requirements / "requirements-postgresql
 
 # 3.4 Dossier « src/ » et ses sous-dossiers
 dossier_src = racine_projet / "src"
-dossier_modules = dossier_src / "modules"
+dossier_extraction = dossier_src / "extraction"  # pour les scripts d'extraction
+dossier_staging = dossier_src / "staging"  # pour les scripts de staging
+dossier_transformation = dossier_src / "transformation"  # pour les scripts de transformation
+dossier_chargement = dossier_src / "chargement"  # pour les scripts de chargement
 dossier_outils = dossier_src / "outils"
 dossier_db = dossier_src / "db"  # si un sous-dossier « db » existe dans src
 
 # 3.5 Scripts principaux à exécuter depuis « src/modules »
-chemin_script_extraction_complete = dossier_modules / "extraction_complete_access.py"
-chemin_script_extraction_entetes = dossier_modules / "extraction_entetes.py"
+extraction_access_sage = dossier_extraction / "extraction_complete_access.py"
+chemin_script_extraction_entetes = dossier_extraction / "extraction_entetes.py"
 chemin_script_generer_statistiques = dossier_outils / "generer_statistiques_tables.py"
-chemin_script_nettoyage = dossier_modules / "nettoyage_fichiers_csv.py"
-chemin_script_construction_bdd = dossier_modules / "construction_bdd_sql.py"
+chemin_script_nettoyage = dossier_staging / "nettoyage_fichiers_bruts_sage.py"
+chemin_vers_bdd = dossier_chargement / "vers_bdd.py" # Modifier/eliminer cette dossier et les fichiers à l'intérieurs
+chemin_vers_csv = dossier_chargement / "vers_csv.py" # Modifier/eliminer cette dossier et les fichiers à l'intérieurs
 
 # 3.6 Dossier de statistiques (si utilisé)
 dossier_statistiques = racine_projet / "statistiques"
 dossier_analyse_structure = dossier_statistiques / "analyse_structure_db"
 dossier_tables_statistiques = dossier_statistiques / "tables"
+
+# 3.6.1 Dossier pour les en-têtes extraites des fichiers CSV
+dossier_entetes = dossier_statistiques / "entetes"  # pour les en-têtes extraites
+dossier_entetes_sage = dossier_entetes / "sage"  # pour les en-têtes extraites
 
 # 3.7 Fichiers JSON de configuration pour les bases
 dossier_config = racine_projet / "config"
@@ -79,7 +88,7 @@ def creer_dossier_s_il_n_existe_pas(chemin: Path) -> None:
 #    (utile pour éviter les erreurs si les dossiers n’existent pas)
 creer_dossier_s_il_n_existe_pas(dossier_datalake_raw_sage)
 creer_dossier_s_il_n_existe_pas(dossier_datalake_staging_sage)
-creer_dossier_s_il_n_existe_pas(dossier_datalake_entetes)
+creer_dossier_s_il_n_existe_pas(dossier_entetes_sage)
 
 # 6. (Optionnel) Pour le débogage : afficher toutes les routes définies
 if __name__ == "__main__":
@@ -91,10 +100,10 @@ if __name__ == "__main__":
     print("requirements_mysql.txt     :", chemin_requirements_mysql)
     print("requirements_postgresql.txt:", chemin_requirements_postgresql)
     print("db_sage_access             :", dossier_db_access)
-    print("extraits/csv_extraits      :", dossier_datalake_raw_sage)
-    print("extraits/xlsx_propres      :", dossier_datalake_staging_sage)
-    print("extraits/entetes_csv       :", dossier_datalake_entetes)
-    print("src/modules                :", dossier_modules)
+    print("datalake/raw/sage          :", dossier_datalake_raw_sage)
+    print("datalake/staging/sage      :", dossier_datalake_staging_sage)
+    print("datalake/processed         :", dossier_datalake_processed)
+    print("datalake/raw/entetes_sage  :", dossier_entetes_sage)
     print("src/outils                 :", dossier_outils)
     print("src/db                     :", dossier_db)
     print("statistiques               :", dossier_statistiques)
