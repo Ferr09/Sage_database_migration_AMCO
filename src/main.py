@@ -136,6 +136,7 @@ def transformation():
     print("=== Transformation ===")
     run_module("src.staging.nettoyage_fichiers_bruts_sage")
     run_module("src.chargement.vers_csv")
+    run_module("src.transformation.structuration_etoile")
 
 def chargement():
     print("=== Chargement en Supabase/PostgreSQL ===")

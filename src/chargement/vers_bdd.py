@@ -19,7 +19,6 @@ def load_supabase_config() -> dict:
         use = input(f"{cfg_file.name} détecté. L’utiliser ? (o/n) : ").strip().lower()
         if use.startswith("o"):
             return json.loads(cfg_file.read_text(encoding="utf-8"))
-    # sinon on crée
     print("Création de supabase_config.json")
     url = input("URL Supabase (ex : https://xyz.supabase.co) : ").strip()
     key = getpass.getpass("Service role key (API) : ").strip()
@@ -55,20 +54,29 @@ def main():
     conf = load_supabase_config()
     supabase = connect_supabase(conf)
 
-    # VENTES
+    # VENTES en modèle étoile
     ventes_dir = dossier_datalake_processed / "ventes"
-    for fname in ["Clients.csv", "FamillesArticles.csv", "Articles.csv",
-                  "CommandesClients.csv", "Factures.csv", "LignesFacture.csv"]:
-        upload_csv(supabase, ventes_dir / fname, schema="ventes", table=Path(fname).stem)
+    for fname in [
+        "dim_client.csv",
+        "dim_article.csv",
+        "dim_temps.csv",
+        "fact_ventes.csv"
+    ]:
+        table = Path(fname).stem  # dim_client, dim_article, etc.
+        upload_csv(supabase, ventes_dir / fname, schema="ventes", table=table)
 
-    # ACHATS
+    # ACHATS en modèle étoile
     achats_dir = dossier_datalake_processed / "achats"
-    for fname in ["Fournisseurs.csv", "FamillesArticles.csv", "Articles.csv",
-                  "ArticlesFournisseurs.csv", "CommandesFournisseurs.csv",
-                  "FacturesFournisseurs.csv", "LignesFactureFournisseur.csv"]:
-        upload_csv(supabase, achats_dir / fname, schema="achats", table=Path(fname).stem)
+    for fname in [
+        "dim_fournisseur.csv",
+        "dim_article.csv",
+        "dim_temps.csv",
+        "fact_achats.csv"
+    ]:
+        table = Path(fname).stem  # dim_fournisseur, dim_article, etc.
+        upload_csv(supabase, achats_dir / fname, schema="achats", table=table)
 
-    print("→ Chargement terminé avec succès !")
+    print("→ Chargement en modèle étoile terminé avec succès !")
 
 if __name__ == "__main__":
     main()
