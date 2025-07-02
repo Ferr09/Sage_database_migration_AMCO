@@ -42,7 +42,7 @@ def upload_csv(supabase: Client, csv_path: Path, schema: str, table: str):
     records = df.where(pd.notnull(df), None).to_dict(orient="records")
     full_name = f"{schema}.{table}"
     print(f"Insertion de {len(records)} lignes dans {full_name}…")
-    res = supabase.table(full_name).insert(records).execute()
+    res = supabase.from_(full_name).insert(records).execute()
     if res.error:
         raise RuntimeError(f"Erreur insertion {full_name} : {res.error.message}")
     print(f"→ {len(records)} lignes insérées dans {full_name}.")
