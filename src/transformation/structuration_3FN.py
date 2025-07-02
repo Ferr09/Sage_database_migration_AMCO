@@ -21,191 +21,151 @@ logging.basicConfig(
 )
 
 # Répertoires de sortie basés sur dossier_datalake_processed
-VENTES_DIR = os.path.join(dossier_datalake_processed, "ventes")
-ACHATS_DIR = os.path.join(dossier_datalake_processed, "achats")
+VENTES_DIR = os.path.join(dossier_datalake_processed, "ventes_star")
+ACHATS_DIR = os.path.join(dossier_datalake_processed, "achats_star")
 
 os.makedirs(VENTES_DIR, exist_ok=True)
 os.makedirs(ACHATS_DIR, exist_ok=True)
 
-# Fonction utilitaire pour extraire une colonne ou NA si absente
+# Utilitaire pour extraire colonne ou NA
 
 def get_col(df, col_name):
     return df[col_name] if col_name in df.columns else pd.Series(pd.NA, index=df.index)
 
+# Génération des CSV en modèle étoile pour Ventes
 
-def generer_csv_ventes():
+def generer_csv_ventes_star():
     df = pd.read_csv(
         os.path.join(dossier_datalake_processed, 'tabla_generale_ventes.csv'),
-        parse_dates=['Date BL','date facture','Date demandée client','Date accusée AMCO'],
+        parse_dates=['date BL','date facture','Date demandée client','Date accusée AMCO'],
         encoding='utf-8-sig',
         low_memory=False
     )
-    # 2.1 Clients
-    clients = pd.DataFrame({
+    # Dimension clients
+    dim_client = pd.DataFrame({
         'code_client': get_col(df, 'Code client'),
-        'raison_sociale': get_col(df, 'Raison sociale'),
-        'famille_client': get_col(df, 'Famille du client'),
-        'responsable_dossier': get_col(df, 'responsable du dossier'),
-        'representant': get_col(df, 'représentant')
-    }).drop_duplicates()
-    clients.to_csv(os.path.join(VENTES_DIR, 'clients.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"clients.csv généré : {len(clients)} lignes")
-    
-    # 2.2 Familles d’articles
-    familles = pd.DataFrame({
-        'libelle_famille': get_col(df, 'famille article libellé'),
-        'libelle_sous_famille': get_col(df, 'sous-famille article libellé')
-    }).drop_duplicates()
-    familles['code_famille'] = (
-        familles['libelle_famille']
-        .fillna('')
-        .str.replace(r'\s+', '_', regex=True)
-        .str.lower()
-        .replace('', pd.NA)
-    )
-    familles = familles[['code_famille','libelle_famille','libelle_sous_famille']]
-    familles.to_csv(os.path.join(VENTES_DIR, 'famillesarticles.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"famillesarticles.csv généré : {len(familles)} lignes")
-    
-    # 2.3 Articles
-    articles = pd.DataFrame({
+        'raison_sociale': get_col(df, 'Raison sociale')
+    }).drop_duplicates().reset_index(drop=True)
+    dim_client['dim_client_id'] = dim_client.index + 1
+    dim_client = dim_client[['dim_client_id','code_client','raison_sociale']]
+    dim_client.to_csv(os.path.join(VENTES_DIR, 'dim_client.csv'), index=False)
+    logging.info(f"dim_client.csv : {len(dim_client)} lignes")
+
+    # Dimension articles
+    dim_article = pd.DataFrame({
         'code_article': get_col(df, 'code article'),
         'designation': get_col(df, 'Désignation'),
-        'numero_plan': get_col(df, 'Numéro de plan'),
-        'ref_article_client': get_col(df, 'ref cde client'),
-        'libelle_famille': get_col(df, 'famille article libellé')
-    }).drop_duplicates()
-    # Jointure code_famille
-    map_fam = familles.set_index('libelle_famille')['code_famille'].to_dict()
-    articles['id_famille_fk'] = articles['libelle_famille'].map(map_fam)
-    articles = articles[['code_article','designation','numero_plan','ref_article_client','id_famille_fk']]
-    articles.to_csv(os.path.join(VENTES_DIR, 'articles.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"articles.csv généré : {len(articles)} lignes")
-    
-    # 2.4 Commandes clients
-    commandes = pd.DataFrame({
-        'num_commande': get_col(df, 'N° Cde'),
-        'ref_commande_client': get_col(df, 'Ref cde client'),
-        'date_demandee': get_col(df, 'Date demandée client'),
-        'date_accusee': get_col(df, 'Date accusée AMCO'),
-        'code_client': get_col(df, 'Code client')
-    }).drop_duplicates()
-    commandes.to_csv(os.path.join(VENTES_DIR, 'commandesclients.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"commandesclients.csv généré : {len(commandes)} lignes")
-    
-    # 2.5 Factures de vente
-    factures = pd.DataFrame({
-        'num_facture': get_col(df, 'N° facture'),
-        'date_facture': get_col(df, 'date facture'),
-        'num_bl': get_col(df, 'N° BL'),
+        'code_famille': get_col(df, 'famille article libellé'),
+        'libelle_famille': get_col(df, 'famille article libellé'),
+        'libelle_sous_famille': get_col(df, 'sous-famille article libellé')
+    }).drop_duplicates().reset_index(drop=True)
+    dim_article['dim_article_id'] = dim_article.index + 1
+    dim_article = dim_article[['dim_article_id','code_article','designation','code_famille','libelle_famille','libelle_sous_famille']]
+    dim_article.to_csv(os.path.join(VENTES_DIR, 'dim_article.csv'), index=False)
+    logging.info(f"dim_article.csv : {len(dim_article)} lignes")
+
+    # Dimension temps
+    dates = pd.concat([
+        get_col(df, 'Date BL'),
+        get_col(df, 'date facture')
+    ]).dropna().drop_duplicates().reset_index(drop=True)
+    dim_temps = pd.DataFrame({'date_cle': dates.sort_values().unique()})
+    dim_temps['annee'] = pd.to_datetime(dim_temps['date_cle']).dt.year
+    dim_temps['mois'] = pd.to_datetime(dim_temps['date_cle']).dt.month
+    dim_temps['jour'] = pd.to_datetime(dim_temps['date_cle']).dt.day
+    dim_temps['dim_temps_id'] = dim_temps.index + 1
+    dim_temps = dim_temps[['dim_temps_id','date_cle','annee','mois','jour']]
+    dim_temps.to_csv(os.path.join(VENTES_DIR, 'dim_temps.csv'), index=False)
+    logging.info(f"dim_temps.csv : {len(dim_temps)} lignes")
+
+    # Table de faits ventes
+    fact = pd.DataFrame({
         'date_bl': get_col(df, 'Date BL'),
-        'condition_livraison': get_col(df, 'condition_livraison'),
+        'num_bl': get_col(df, 'N° BL'),
+        'date_facture': get_col(df, 'date facture'),
+        'num_facture': get_col(df, 'N° facture'),
+        'quantite': get_col(df, 'Qté fact'),
+        'prix_unitaire': get_col(df, 'Prix Unitaire'),
+        'montant_ht': get_col(df, 'Tot HT'),
         'code_client': get_col(df, 'Code client'),
-        'id_commande_client_fk': get_col(df, 'N° Cde')
-    }).drop_duplicates()
-    factures.to_csv(os.path.join(VENTES_DIR, 'factures.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"factures.csv généré : {len(factures)} lignes")
-    
-    # 2.6 Lignes de facture
-    lignes = pd.DataFrame({
-        'qte_vendue': get_col(df, 'Qté fact'),
-        'prix_unitaire_vente': get_col(df, 'Prix Unitaire'),
-        'id_facture_fk': get_col(df, 'N° facture'),
         'code_article': get_col(df, 'code article')
     })
-    lignes.to_csv(os.path.join(VENTES_DIR, 'lignesfacture.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"lignesfacture.csv généré : {len(lignes)} lignes")
+    # Ajouter clés étrangères de dimensions
+    fact = fact.merge(dim_client, on='code_client', how='left')
+    fact = fact.merge(dim_article, on='code_article', how='left')
+    fact = fact.merge(dim_temps[['dim_temps_id','date_cle']], left_on='date_bl', right_on='date_cle', how='left')
+    fact = fact.rename(columns={'dim_client_id':'dim_client_id',
+                                 'dim_article_id':'dim_article_id',
+                                 'dim_temps_id':'dim_temps_id'})
+    fact = fact[['date_bl','num_bl','date_facture','num_facture','quantite','prix_unitaire','montant_ht',
+                 'dim_client_id','dim_article_id','dim_temps_id']]
+    fact.to_csv(os.path.join(VENTES_DIR, 'fact_ventes.csv'), index=False)
+    logging.info(f"fact_ventes.csv : {len(fact)} lignes")
 
+# Génération des CSV en modèle étoile pour Achats
 
-def generer_csv_achats():
+def generer_csv_achats_star():
     df = pd.read_csv(
         os.path.join(dossier_datalake_processed, 'tabla_generale_achats.csv'),
         parse_dates=['Date BL','date facture','Date demandée client','Date accusée AMCO'],
         encoding='utf-8-sig',
         low_memory=False
     )
-    # 3.1 Fournisseurs
-    fourn = pd.DataFrame({
-        'code_fournisseur': get_col(df, 'Code client'),
-        'raison_sociale': get_col(df, 'Raison sociale'),
-        'famille_fournisseur': get_col(df, 'Famille du client'),
-        'responsable_dossier': get_col(df, 'responsable du dossier'),
-        'representant': get_col(df, 'représentant')
-    }).drop_duplicates()
-    fourn.to_csv(os.path.join(ACHATS_DIR, 'fournisseurs.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"fournisseurs.csv généré : {len(fourn)} lignes")
-    
-    # 3.2 Familles d’articles achats
-    familles = pd.DataFrame({
-        'libelle_famille': get_col(df, 'famille article libellé'),
-        'libelle_sous_famille': get_col(df, 'sous-famille article libellé')
-    }).drop_duplicates()
-    familles['code_famille'] = (
-        familles['libelle_famille']
-        .fillna('')
-        .str.replace(r'\s+', '_', regex=True)
-        .str.lower()
-        .replace('', pd.NA)
-    )
-    familles.to_csv(os.path.join(ACHATS_DIR, 'famillesarticles.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"famillesarticles.csv généré : {len(familles)} lignes")
-    
-    # 3.3 Articles achats
-    articles = pd.DataFrame({
+    # Dimension fournisseurs
+    dim_fourn = pd.DataFrame({
+        'code_fournisseur': get_col(df, 'Ref cde fournisseur'),
+        'raison_sociale': get_col(df, 'Raison sociale')
+    }).drop_duplicates().reset_index(drop=True)
+    dim_fourn['dim_fournisseur_id'] = dim_fourn.index + 1
+    dim_fourn = dim_fourn[['dim_fournisseur_id','code_fournisseur','raison_sociale']]
+    dim_fourn.to_csv(os.path.join(ACHATS_DIR, 'dim_fournisseur.csv'), index=False)
+    logging.info(f"dim_fournisseur.csv : {len(dim_fourn)} lignes")
+
+    # Réutiliser dim_article et dim_temps depuis ventes_star si désiré
+    # On recrée pour isolation
+    dim_article = pd.DataFrame({
         'code_article': get_col(df, 'code article'),
         'designation': get_col(df, 'Désignation'),
-        'numero_plan': get_col(df, 'Numéro de plan'),
-        'libelle_famille': get_col(df, 'famille article libellé')
-    }).drop_duplicates()
-    map_fam = familles.set_index('libelle_famille')['code_famille'].to_dict()
-    articles['id_famille_fk'] = articles['libelle_famille'].map(map_fam)
-    articles = articles[['code_article','designation','numero_plan','id_famille_fk']]
-    articles.to_csv(os.path.join(ACHATS_DIR, 'articles.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"articles.csv généré : {len(articles)} lignes")
-    
-    # 3.4 Articles par fournisseur
-    art_fourn = pd.DataFrame({
-        'code_article': get_col(df, 'code article'),
-        'ref_article_fournisseur': get_col(df, 'Ref cde fournisseur')
-    }).drop_duplicates()
-    art_fourn.to_csv(os.path.join(ACHATS_DIR, 'articlesfournisseurs.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"articlesfournisseurs.csv généré : {len(art_fourn)} lignes")
-    
-    # 3.5 Commandes fournisseurs
-    commandes = pd.DataFrame({
-        'num_commande': get_col(df, 'N° BC'),
-        'ref_commande_fourn': get_col(df, 'Ref cde fournisseur'),
-        'date_commande': get_col(df, 'Date demandée client'),
-        'date_livraison_prevue': get_col(df, 'Date accusée AMCO')
-    }).drop_duplicates()
-    commandes.to_csv(os.path.join(ACHATS_DIR, 'commandesfournisseurs.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"commandesfournisseurs.csv généré : {len(commandes)} lignes")
-    
-    # 3.6 Factures fournisseurs
+        'code_famille': get_col(df, 'famille article libellé'),
+        'libelle_famille': get_col(df, 'famille article libellé'),
+        'libelle_sous_famille': get_col(df, 'sous-famille article libellé')
+    }).drop_duplicates().reset_index(drop=True)
+    dim_article['dim_article_id'] = dim_article.index + 1
+    dim_article = dim_article[['dim_article_id','code_article','designation','code_famille','libelle_famille','libelle_sous_famille']]
+    dim_article.to_csv(os.path.join(ACHATS_DIR, 'dim_article.csv'), index=False)
+    logging.info(f"dim_article.csv : {len(dim_article)} lignes")
+
+    dim_temps = pd.DataFrame({'date_cle': get_col(df, 'Date BL').dropna().drop_duplicates()})
+    dim_temps['annee'] = pd.to_datetime(dim_temps['date_cle']).dt.year
+    dim_temps['mois'] = pd.to_datetime(dim_temps['date_cle']).dt.month
+    dim_temps['jour'] = pd.to_datetime(dim_temps['date_cle']).dt.day
+    dim_temps['dim_temps_id'] = dim_temps.index + 1
+    dim_temps = dim_temps[['dim_temps_id','date_cle','annee','mois','jour']]
+    dim_temps.to_csv(os.path.join(ACHATS_DIR, 'dim_temps.csv'), index=False)
+    logging.info(f"dim_temps.csv : {len(dim_temps)} lignes")
+
     fact = pd.DataFrame({
-        'num_facture': get_col(df, 'N° facture'),
-        'date_facture': get_col(df, 'date facture'),
+        'date_bl': get_col(df, 'Date BL'),
         'num_bl': get_col(df, 'N° BC'),
-        'date_bl': get_col(df, 'Date BL')
-    }).drop_duplicates()
-    fact.to_csv(os.path.join(ACHATS_DIR, 'facturesfournisseurs.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"facturesfournisseurs.csv généré : {len(fact)} lignes")
-    
-    # 3.7 Lignes facture fournisseur
-    lignes = pd.DataFrame({
-        'qte_achetee': get_col(df, 'Qté fact'),
-        'prix_unitaire_achat': get_col(df, 'Prix Unitaire'),
-        'id_facture_fourn_fk': get_col(df, 'N° facture'),
+        'quantite': get_col(df, 'Qté fact'),
+        'prix_unitaire': get_col(df, 'Prix Unitaire'),
+        'code_fournisseur': get_col(df, 'Ref cde fournisseur'),
         'code_article': get_col(df, 'code article')
     })
-    lignes.to_csv(os.path.join(ACHATS_DIR, 'lignesfacturefournisseur.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"lignesfacturefournisseur.csv généré : {len(lignes)} lignes")
+    fact = fact.merge(dim_fourn, on='code_fournisseur', how='left')
+    fact = fact.merge(dim_article, on='code_article', how='left')
+    fact = fact.merge(dim_temps[['dim_temps_id','date_cle']], on='date_bl', how='left')
+    fact = fact[['date_bl','num_bl','quantite','prix_unitaire',
+                 'dim_fournisseur_id','dim_article_id','dim_temps_id']]
+    fact.to_csv(os.path.join(ACHATS_DIR, 'fact_achats.csv'), index=False)
+    logging.info(f"fact_achats.csv : {len(fact)} lignes")
 
+# Main
 
 def main():
-    generer_csv_ventes()
-    generer_csv_achats()
-    logging.info("Tous les CSV 3FN ont été générés dans les dossiers 'ventes' et 'achats' sous processed")
+    generer_csv_ventes_star()
+    generer_csv_achats_star()
+    logging.info("Modèle étoile CSV générés pour ventes_star et achats_star")
 
 if __name__ == "__main__":
     main()
