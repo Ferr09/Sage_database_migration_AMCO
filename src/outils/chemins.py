@@ -96,8 +96,6 @@ if __name__ == "__main__":
     print("Makefile                   :", chemin_makefile)
     print("requirements               :", dossier_requirements)
     print("requirements_extraction.txt:", chemin_requirements_extraction)
-    print("requirements_mysql.txt     :", chemin_requirements_mysql)
-    print("requirements_postgresql.txt:", chemin_requirements_postgresql)
     print("db_sage_access             :", dossier_db_access)
     print("datalake/raw/sage          :", dossier_datalake_raw_sage)
     print("datalake/staging/sage      :", dossier_datalake_staging_sage)

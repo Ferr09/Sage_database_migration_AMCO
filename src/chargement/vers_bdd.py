@@ -11,10 +11,6 @@ from supabase import create_client, Client
 
 from src.outils.chemins import dossier_datalake_processed, dossier_config
 
-# --------------------------------------------------------------------
-# 1) Charger ou créer supabase_config.json
-# --------------------------------------------------------------------
-
 def load_supabase_config() -> dict:
     cfg_file = dossier_config / "supabase_config.json"
     if cfg_file.exists():
@@ -30,57 +26,93 @@ def load_supabase_config() -> dict:
     print(f"{cfg_file.name} créé.")
     return conf
 
-# --------------------------------------------------------------------
-# 2) Connexion Supabase
-# --------------------------------------------------------------------
-
 def connect_supabase(conf: dict) -> Client:
     return create_client(conf["url"], conf["key"])
 
-# --------------------------------------------------------------------
-# 3) Fonction générique d’upload d’un CSV vers un schema.table
-# --------------------------------------------------------------------
+from postgrest import APIError
 
 def upload_csv(supabase: Client, csv_path: Path, schema: str, table: str):
-    df = pd.read_csv(csv_path, dtype=str, encoding="utf-8-sig")
+    # 1) Chargement du CSV
+    df = pd.read_csv(csv_path, dtype=str, encoding="utf-8-sig").where(pd.notnull, None)
 
-    # Déterminer colonne on_conflict
-    if table == 'dim_article':
-        conflict_col = 'code_article'
-        # Ne pas envoyer dim_article_id pour éviter conflit PK
-        df = df.drop(columns=[col for col in df.columns if col.endswith('_id')], errors='ignore')
-    elif table == 'dim_fournisseur':
-        conflict_col = 'code_fournisseur'
-        df = df.drop(columns=[col for col in df.columns if col.endswith('_id')], errors='ignore')
-    else:
-        conflict_col = f"{table}_id"
+    # 2) Dimensions
+    if table.startswith("dim_"):
+        key_map = {
+            "dim_client":           ("code_client",           ["dim_client_id"]),
+            "dim_famillesarticles": ("code_famille",          ["id_famille"]),
+            "dim_article":          ("code_article",          ["dim_article_id"]),
+            "dim_fournisseur":      ("code_fournisseur",      ["dim_fournisseur_id"]),
+            "dim_temps":            ("date_cle",              ["dim_temps_id"]),
+        }
+        if table not in key_map:
+            raise RuntimeError(f"Dimension inconnue : {table}")
 
-    # Supprimer doublons dans le batch
-    if conflict_col in df.columns:
-        df = df.drop_duplicates(subset=[conflict_col])
+        natural_key, drop_ids = key_map[table]
+        # Retirer les colonnes _id pour laisser la séquence
+        df = df.drop(columns=[c for c in drop_ids if c in df.columns], errors="ignore")
 
-    records = df.where(pd.notnull(df), None).to_dict(orient="records")
-    print(f"Upserting {len(records)} lignes dans {schema}.{table}…")
+        try:
+            # Cas spécial : dim_famillesarticles utilise clé composée
+            if table == "dim_famillesarticles":
+                df = df.drop_duplicates(
+                    subset=["code_famille","libelle_famille","libelle_sous_famille"]
+                )
+                records = df.to_dict(orient="records")
 
-    try:
-        supabase.schema(schema).table(table).upsert(records, on_conflict=conflict_col).execute()
-    except APIError as e:
-        raise RuntimeError(f"Erreur upsert {schema}.{table} : {e}") from e
+                print(f"Upserting {len(records)} lignes dans {schema}.{table} (clé composée)…")
+                supabase.schema(schema) \
+                         .table(table) \
+                         .upsert(records,
+                                 on_conflict=["code_famille","libelle_famille","libelle_sous_famille"]) \
+                         .execute()
+                print(f"→ {len(records)} lignes upsertées dans {schema}.{table}.")
+                return
 
-    print(f"→ {len(records)} lignes upsertées dans {schema}.{table}.")
+            # Clé simple pour les autres dimensions
+            df = df.drop_duplicates(subset=[natural_key])
+            records = df.to_dict(orient="records")
 
-# --------------------------------------------------------------------
-# 4) Main
-# --------------------------------------------------------------------
+            print(f"Upserting {len(records)} lignes dans {schema}.{table} (clé={natural_key})…")
+            supabase.schema(schema) \
+                     .table(table) \
+                     .upsert(records, on_conflict=natural_key) \
+                     .execute()
+            print(f"→ {len(records)} lignes upsertées dans {schema}.{table}.")
+            return
+
+        except APIError as e:
+            raise RuntimeError(f"Erreur upsert {schema}.{table} : {e}") from e
+
+    # 3) Tables de faits – upsert sur dl_no (champ UNIQUE dans le DDL)
+    if table.startswith("fact_"):
+        natural_key = "dl_no"
+        df = df.drop_duplicates(subset=[natural_key])
+        records = df.to_dict(orient="records")
+
+        try:
+            print(f"Upserting {len(records)} lignes dans {schema}.{table} (clé={natural_key})…")
+            supabase.schema(schema) \
+                     .table(table) \
+                     .upsert(records, on_conflict=natural_key) \
+                     .execute()
+            print(f"→ {len(records)} lignes upsertées dans {schema}.{table}.")
+            return
+
+        except APIError as e:
+            raise RuntimeError(f"Erreur upsert {schema}.{table} : {e}") from e
+
+    # 4) Cas inattendu
+    raise RuntimeError(f"Table non gérée : {schema}.{table}")
 
 def main():
     conf = load_supabase_config()
     supabase = connect_supabase(conf)
 
-    # VENTES en modèle étoile
+    # VENTES
     ventes_dir = dossier_datalake_processed / "ventes"
     for fname in [
         "dim_client.csv",
+        "dim_famillesarticles.csv",
         "dim_article.csv",
         "dim_temps.csv",
         "fact_ventes.csv"
@@ -88,10 +120,11 @@ def main():
         table = Path(fname).stem
         upload_csv(supabase, ventes_dir / fname, schema="ventes", table=table)
 
-    # ACHATS en modèle étoile
+    # ACHATS
     achats_dir = dossier_datalake_processed / "achats"
     for fname in [
         "dim_fournisseur.csv",
+        "dim_famillesarticles.csv",
         "dim_article.csv",
         "dim_temps.csv",
         "fact_achats.csv"

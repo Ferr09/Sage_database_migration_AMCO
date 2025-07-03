@@ -85,22 +85,31 @@ def generer_achats_simplifie():
     f  = _load_staging("FAMILLE")
     c  = _load_staging("COMPTET")
 
-    df = (d
+    # 1) On élimine les lignes sans Ref cde fournisseur (AF_REFFOURNISS vide ou null)
+    mask_fourn = d["AF_REFFOURNISS"].notna() & (d["AF_REFFOURNISS"].astype(str).str.strip() != "")
+    d_filtree = d.loc[mask_fourn].copy()
+    logger.info("F_DOCLIGNE filtré pour achats : %d lignes restantes", len(d_filtree))
+
+    # 2) Joins
+    df = (
+        d_filtree
         .merge(af[["AF_REFFOURNISS"]], on="AF_REFFOURNISS", how="left", validate="many_to_one")
         .merge(a[["AR_REF","FA_CODEFAMILLE"]], on="AR_REF", how="left", validate="many_to_one")
         .merge(f[["FA_CODEFAMILLE","FA_CENTRAL","FA_INTITULE"]], on="FA_CODEFAMILLE", how="left", validate="many_to_one")
         .merge(c[["CT_NUM","CT_INTITULE"]], on="CT_NUM", how="left", validate="many_to_one")
     )
 
+    # 3) Liste des champs à conserver (sans "Ref cde client")
     champs = [
         "Famille du client","Ref cde fournisseur","Code client","Raison sociale",
-        "N° BC","Date BL","condition_livraison","Ref cde client","code article",
+        "N° BC","Date BL","condition_livraison","code article",
         "N° Cde","Désignation","famille article libellé",
         "sous-famille article libellé","Qté fact","Prix Unitaire","Tot HT",
         "Année","Mois","responsable du dossier","représentant","N° facture",
         "date facture","Date demandée client","Date accusée AMCO","Numéro de plan"
     ]
 
+    # 4) Construction du DataFrame de sortie
     data = {}
     for name in champs:
         if name == "N° Cde":
@@ -114,11 +123,17 @@ def generer_achats_simplifie():
             data[name] = pd.to_datetime(df["DO_DATE"], errors="coerce").dt.month.astype("Int64")        
         else:
             mapping = {
-                "Famille du client":"FA_CODEFAMILLE","Ref cde fournisseur":"AF_REFFOURNISS",
-                "Code client":"CT_NUM","Raison sociale":"CT_INTITULE","N° BC":"DL_PIECEBC",
-                "Date BL":"DL_DATEBL","Ref cde client":"AC_REFCLIENT",
-                "code article":"AR_REF","Désignation":"DL_DESIGN",
-                "famille article libellé":"FA_CENTRAL","sous-famille article libellé":"FA_INTITULE"
+                "Famille du client":"FA_CODEFAMILLE",
+                "Ref cde fournisseur":"AF_REFFOURNISS",
+                "Code client":"CT_NUM",
+                "Raison sociale":"CT_INTITULE",
+                "N° BC":"DL_PIECEBC",
+                "Date BL":"DL_DATEBL",
+                "condition_livraison":"condition_livraison",
+                "code article":"AR_REF",
+                "Désignation":"DL_DESIGN",
+                "famille article libellé":"FA_CENTRAL",
+                "sous-famille article libellé":"FA_INTITULE"
             }
             if name in mapping and mapping[name] in df.columns:
                 data[name] = df[mapping[name]]
@@ -126,6 +141,8 @@ def generer_achats_simplifie():
                 data[name] = pd.NA
 
     df_out = pd.DataFrame(data)
+
+    # 5) Export CSV
     os.makedirs(dossier_datalake_processed, exist_ok=True)
     sortie = dossier_datalake_processed / "tabla_generale_achats.csv"
     df_out.to_csv(sortie, index=False, encoding="utf-8-sig")
