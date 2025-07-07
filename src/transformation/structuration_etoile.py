@@ -92,7 +92,6 @@ def generer_csv_ventes_star():
     dim_temps.to_csv(os.path.join(VENTES_DIR, 'dim_temps.csv'), index=False)
     logging.info(f"dim_temps.csv : {len(dim_temps)} lignes")
 
-    # … après avoir généré dim_client, dim_article et dim_temps …
 
     # 1) Construction du DataFrame fact
     fact = pd.DataFrame({
@@ -159,123 +158,103 @@ def generer_csv_ventes_star():
 
 # Génération des CSV en modèle étoile pour Achats
 
+
 def generer_csv_achats_star():
+    # 0) Lecture de la table générale achats
     df = pd.read_csv(
         os.path.join(dossier_datalake_processed, 'tabla_generale_achats.csv'),
-        parse_dates=['Date BL', 'date facture', 'Date demandée client', 'Date accusée AMCO'],
         encoding='utf-8-sig',
+        parse_dates=['date achat'],
+        dayfirst=True,
         low_memory=False
     )
 
-    # Dimension fournisseurs
+    # 1) Dimension fournisseurs (dim_fournisseur)
+    # - code_fournisseur, raison_sociale, famille_fournisseur
+    # - clés UNKNOWN gérées par Supabase
     dim_fourn = pd.DataFrame({
-        'code_fournisseur': get_col(df, 'Ref cde fournisseur'),
-        'raison_sociale': get_col(df, 'Raison sociale'),
-        'famille_fournisseur': get_col(df, 'Famille du client'),
-        'responsable_dossier': get_col(df, 'responsable du dossier'),
-        'representant': get_col(df, 'représentant')
+        'code_fournisseur': get_col(df, 'Code fournisseur'),
+        'raison_sociale':   get_col(df, 'Raison sociale'),
+        'famille_fournisseur': get_col(df, 'Famille du client')
     }).drop_duplicates().reset_index(drop=True)
     dim_fourn['dim_fournisseur_id'] = dim_fourn.index + 1
-    dim_fourn = dim_fourn[['dim_fournisseur_id','code_fournisseur','raison_sociale','famille_fournisseur','responsable_dossier','representant']]
+    dim_fourn = dim_fourn[['dim_fournisseur_id', 'code_fournisseur', 'raison_sociale', 'famille_fournisseur']]
     dim_fourn.to_csv(os.path.join(ACHATS_DIR, 'dim_fournisseur.csv'), index=False)
-    logging.info(f"dim_fournisseur.csv : {len(dim_fourn)} lignes")
 
-    # Dimension familles d'articles achats
+    # 2) Dimension familles articles (dim_famille_article)
     dim_fam_a = pd.DataFrame({
-        'code_famille': get_col(df, 'famille article libellé'),
-        'libelle_famille': get_col(df, 'famille article libellé'),
-        'libelle_sous_famille': get_col(df, 'sous-famille article libellé')
+        'fa_codef':       get_col(df, 'famille article libellé'),
+        'fa_central':     get_col(df, 'famille article libellé'),
+        'fa_intitule':    get_col(df, 'sous-famille article libellé')
     }).drop_duplicates().reset_index(drop=True)
-    dim_fam_a['id_famille'] = dim_fam_a.index + 1
-    dim_fam_a = dim_fam_a[['id_famille','code_famille','libelle_famille','libelle_sous_famille']]
-    dim_fam_a.to_csv(os.path.join(ACHATS_DIR, 'dim_famillesarticles.csv'), index=False)
-    logging.info(f"dim_famillesarticles.csv : {len(dim_fam_a)} lignes")
+    dim_fam_a['famille_id'] = dim_fam_a.index + 1
+    dim_fam_a = dim_fam_a[['famille_id', 'fa_codef', 'fa_central', 'fa_intitule']]
+    dim_fam_a.to_csv(os.path.join(ACHATS_DIR, 'dim_famille_article.csv'), index=False)
 
-    # Dimension articles achats
-    dim_article_a = pd.DataFrame({
-        'code_article': get_col(df, 'code article'),
-        'designation': get_col(df, 'Désignation'),
-        'numero_plan': get_col(df, 'Numéro de plan'),
-        'id_famille_fk': get_col(df, 'famille article libellé')
-    }).drop_duplicates(subset=['code_article','designation','id_famille_fk'])
-    dim_article_a['dim_article_id'] = dim_article_a.index + 1
-    dim_article_a = dim_article_a[['dim_article_id','code_article','designation','numero_plan','id_famille_fk']]
-    dim_article_a.to_csv(os.path.join(ACHATS_DIR, 'dim_article.csv'), index=False)
-    logging.info(f"dim_article.csv : {len(dim_article_a)} lignes")
+    # 3) Dimension articles (dim_article)
+    dim_article = pd.DataFrame({
+        'ar_ref':       get_col(df, 'code article'),
+        'famille_id':   get_col(df, 'famille article libellé')
+    }).drop_duplicates().reset_index(drop=True)
+    dim_article = dim_article.merge(
+        dim_fam_a[['fa_codef', 'famille_id']],
+        left_on='famille_id', right_on='fa_codef', how='left'
+    )
+    dim_article = dim_article[['ar_ref', 'famille_id_y']]
+    dim_article.columns = ['ar_ref', 'famille_id']
+    dim_article['article_id'] = dim_article.index + 1
+    dim_article = dim_article[['article_id', 'ar_ref', 'famille_id']]
+    dim_article.to_csv(os.path.join(ACHATS_DIR, 'dim_article.csv'), index=False)
 
-    # Dimension temps achats journalier
-    dates_a = pd.concat([df['Date BL'], df['date facture'], df['Date demandée client'], df['Date accusée AMCO']])
-    dim_temps_a = pd.DataFrame({'date_cle': dates_a.dropna().drop_duplicates().reset_index(drop=True)})
-    dim_temps_a['annee'] = dim_temps_a['date_cle'].dt.year
-    dim_temps_a['mois'] = dim_temps_a['date_cle'].dt.month
-    dim_temps_a['jour'] = dim_temps_a['date_cle'].dt.day
-    dim_temps_a['dim_temps_id'] = dim_temps_a.index + 1
-    dim_temps_a = dim_temps_a[['dim_temps_id','date_cle','annee','mois','jour']]
-    dim_temps_a.to_csv(os.path.join(ACHATS_DIR, 'dim_temps.csv'), index=False)
-    logging.info(f"dim_temps.csv : {len(dim_temps_a)} lignes")
-    
+    # 4) Dimension temps (dim_date)
+    # Utilise uniquement la date achat
+    dates = df['date achat'].dropna().drop_duplicates().reset_index(drop=True)
+    dim_date = pd.DataFrame({'date_full': dates})
+    dim_date['annee'] = dim_date['date_full'].dt.year
+    dim_date['mois'] = dim_date['date_full'].dt.month
+    dim_date['jour'] = dim_date['date_full'].dt.day
+    dim_date['date_id'] = dim_date.index + 1
+    dim_date = dim_date[['date_id', 'date_full', 'annee', 'mois', 'jour']]
+    dim_date.to_csv(os.path.join(ACHATS_DIR, 'dim_date.csv'), index=False)
 
-    # 1) Construction du DataFrame fact_a
+    # 5) Construction de la table de faits fact_achats
     fact_a = pd.DataFrame({
-        'dl_no':                  get_col(df, 'N° Ligne doc'),
-        'date_bl':                get_col(df, 'Date BL'),
-        'num_bc':                 get_col(df, 'N° BC'),
-        'date_livraison_prevue':  get_col(df, 'Date accusée AMCO'),
-        'qte_achetee':            get_col(df, 'Qté fact'),
-        'prix_unitaire_achat':    get_col(df, 'Prix Unitaire'),
-        'code_fournisseur':       get_col(df, 'Ref cde fournisseur'),
-        'code_article':           get_col(df, 'code article'),
-        'designation':            get_col(df, 'Désignation')
+        'date_achat':      get_col(df, 'date achat'),
+        'code_fournisseur': get_col(df, 'Code fournisseur'),
+        'ar_ref':          get_col(df, 'code article'),
+        'bon_de_commande': get_col(df, 'Bon de commande'),
+        'qte_fact':        get_col(df, 'Qté fact'),
+        'total_ht':        get_col(df, 'Total HT'),
+        'total_ttc':       get_col(df, 'Total TTC'),
+        'net_a_payer':     get_col(df, 'NET A PAYER')
     })
 
-    # 2) Vérification des clés naturelles
-    if fact_a['code_fournisseur'].isna().any():
-        raise ValueError("fact_achats contient code_fournisseur invalide")
-    if fact_a['code_article'].isna().any():
-        raise ValueError("fact_achats contient code_article invalide")
-
-    # 3) Merge pour dim_fournisseur
+    # 5a) Jointure dim_date
     fact_a = fact_a.merge(
-        dim_fourn[['code_fournisseur','dim_fournisseur_id']],
-        on='code_fournisseur',
-        how='left'
+        dim_date[['date_full', 'date_id']],
+        left_on='date_achat', right_on='date_full', how='left'
+    ).drop(columns=['date_full'])
+
+    # 5b) Jointure dim_fournisseur
+    fact_a = fact_a.merge(
+        dim_fourn[['code_fournisseur', 'dim_fournisseur_id']],
+        on='code_fournisseur', how='left'
     )
-    if fact_a['dim_fournisseur_id'].isna().any():
-        bad = fact_a.loc[fact_a['dim_fournisseur_id'].isna(), 'code_fournisseur'].unique()
-        raise ValueError(f"Échecs de mapping dim_fournisseur pour : {list(bad)}")
 
-    # 4) Merge pour dim_article (code_article + designation)
+    # 5c) Jointure dim_article
     fact_a = fact_a.merge(
-        dim_article_a[['code_article','designation','dim_article_id']],
-        on=['code_article','designation'],
-        how='left'
+        dim_article[['ar_ref', 'article_id']],
+        on='ar_ref', how='left'
     )
-    if fact_a['dim_article_id'].isna().any():
-        bad = fact_a.loc[fact_a['dim_article_id'].isna(), ['code_article','designation']].drop_duplicates()
-        raise ValueError(f"Échecs de mapping dim_article pour ces paires :\n{bad}")
 
-    # 5) Merge pour dim_temps (une seule fois, en ignorant les NaT)
-    fact_a = fact_a.merge(
-        dim_temps_a[['date_cle','dim_temps_id']],
-        left_on='date_bl', right_on='date_cle',
-        how='left'
-    ).drop(columns=['date_cle'])
-    mask_date = fact_a['date_bl'].notna()
-    bad_dates = fact_a.loc[mask_date & fact_a['dim_temps_id'].isna(), 'date_bl'].drop_duplicates()
-    if not bad_dates.empty:
-        raise ValueError(f"Échecs de mapping dim_temps pour ces dates : {list(bad_dates)}")
-
-    # 6) Sélection et export
+    # 6) Sélection colonnes finales
     fact_achats = fact_a[[
-        'dl_no','date_bl','num_bc','date_livraison_prevue',
-        'qte_achetee','prix_unitaire_achat',
-        'dim_fournisseur_id','dim_article_id','dim_temps_id'
+        'date_id', 'dim_fournisseur_id', 'article_id',
+        'bon_de_commande', 'qte_fact', 'total_ht', 'total_ttc', 'net_a_payer'
     ]]
     fact_achats.to_csv(os.path.join(ACHATS_DIR, 'fact_achats.csv'), index=False)
-    logging.info(f"fact_achats.csv : {len(fact_achats)} lignes")
 
 # Main
-
 def main():
     generer_csv_ventes_star()
     generer_csv_achats_star()
