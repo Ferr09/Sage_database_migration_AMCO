@@ -226,7 +226,6 @@ def generer_csv_ventes_star():
 
 # Génération des CSV en modèle étoile pour Achats
 
-
 def generer_csv_achats_star():
     # 0) Lecture de la table générale achats
     df = pd.read_csv(
@@ -238,146 +237,205 @@ def generer_csv_achats_star():
     )
 
     # 1) Dimension fournisseurs (dim_fournisseur)
-    # - code_fournisseur, raison_sociale, famille_fournisseur
-    # - clés UNKNOWN gérées par Supabase
-    # 1) Dimension fournisseurs (dim_fournisseur)
     dim_fourn = pd.DataFrame({
         'code_fournisseur':    get_col(df, 'Code fournisseur'),
         'raison_sociale':      get_col(df, 'Raison sociale'),
         'famille_fournisseur': get_col(df, 'sous-famille article libellé')
     })
-
-    # Remplacer les valeurs manquantes par 'UNKNOWN' pour respecter les contraintes de Supabase
     dim_fourn['famille_fournisseur'] = dim_fourn['famille_fournisseur'].fillna('UNKNOWN')
-
-    # Suppression des doublons et réinitialisation de l’index
     dim_fourn = dim_fourn.drop_duplicates().reset_index(drop=True)
-
-    # Ajout de la clé surrogate
     dim_fourn['dim_fournisseur_id'] = dim_fourn.index + 1
-
-    # Sélection des colonnes finales
     dim_fourn = dim_fourn[[
-        'dim_fournisseur_id',
-        'code_fournisseur',
-        'raison_sociale',
-        'famille_fournisseur'
+        'dim_fournisseur_id','code_fournisseur',
+        'raison_sociale','famille_fournisseur'
     ]]
-
-    # Export CSV
-    dim_fourn.to_csv(
-        os.path.join(ACHATS_DIR, 'dim_fournisseur.csv'),
-        index=False,
-        encoding='utf-8-sig'
-    )
+    dim_fourn.to_csv(os.path.join(ACHATS_DIR,'dim_fournisseur.csv'),
+                     index=False, encoding='utf-8-sig')
     logging.info(f"dim_fournisseur.csv : {len(dim_fourn)} lignes")
-
 
     # 2) Dimension familles articles (dim_famille_article)
     dim_fam_a = pd.DataFrame({
-        'fa_codef':       get_col(df, 'famille article libellé'),
-        'fa_central':     get_col(df, 'famille article libellé'),
-        'fa_intitule':    get_col(df, 'sous-famille article libellé')
+        'fa_codef':    get_col(df, 'famille article libellé'),
+        'fa_central':  get_col(df, 'famille article libellé'),
+        'fa_intitule': get_col(df, 'sous-famille article libellé')
     }).drop_duplicates().reset_index(drop=True)
 
-    if not (dim_fam_a['fa_codef'] == 'UNKNOWN').any():
-        # On préfixe UNKNOWN pour qu’il devienne famille_id = 1
+    # Ajout de UNKNOWN si nécessaire
+    if not (dim_fam_a['fa_codef']=='UNKNOWN').any():
         dim_fam_a = pd.concat([
             pd.DataFrame([{
-                'fa_codef':    'UNKNOWN',
-                'fa_central':  'UNKNOWN',
-                'fa_intitule': 'UNKNOWN'
-            }]),
-            dim_fam_a
+                'fa_codef':'UNKNOWN',
+                'fa_central':'UNKNOWN',
+                'fa_intitule':'UNKNOWN'
+            }]), dim_fam_a
         ], ignore_index=True)
 
-    # Remplir les éventuels NaN restants
-    dim_fam_a['fa_codef']   = dim_fam_a['fa_codef'].fillna('UNKNOWN')
-    dim_fam_a['fa_central'] = dim_fam_a['fa_central'].fillna('UNKNOWN')
-    dim_fam_a['fa_intitule']= dim_fam_a['fa_intitule'].fillna('UNKNOWN')
+    dim_fam_a[['fa_codef','fa_central','fa_intitule']] = \
+        dim_fam_a[['fa_codef','fa_central','fa_intitule']].fillna('UNKNOWN')
 
-    dim_fam_a = dim_fam_a.drop_duplicates(subset=['fa_codef','fa_central','fa_intitule']).reset_index(drop=True)
+    dim_fam_a = dim_fam_a.\
+        drop_duplicates(subset=['fa_codef','fa_central','fa_intitule']).\
+        reset_index(drop=True)
 
     dim_fam_a['famille_id'] = dim_fam_a.index + 1
-    dim_fam_a = dim_fam_a[['famille_id', 'fa_codef', 'fa_central', 'fa_intitule']]
-    dim_fam_a.to_csv(os.path.join(ACHATS_DIR, 'dim_famille_article.csv'), index=False)
+    dim_fam_a = dim_fam_a[['famille_id','fa_codef','fa_central','fa_intitule']]
+    dim_fam_a.to_csv(os.path.join(ACHATS_DIR,'dim_famille_article.csv'),
+                     index=False, encoding='utf-8-sig')
 
     # 3) Dimension articles (dim_article)
     dim_article = pd.DataFrame({
-        'ar_ref':       get_col(df, 'code article'),
-        'famille_id':   get_col(df, 'famille article libellé')
+        'ar_ref':     get_col(df, 'code article'),
+        'famille_fk': get_col(df, 'famille article libellé')
     }).drop_duplicates().reset_index(drop=True)
 
-    # Remplir les ar_ref manquants et s’assurer de la ligne UNKNOWN
     dim_article['ar_ref'] = dim_article['ar_ref'].fillna('UNKNOWN')
-    if not (dim_article['ar_ref'] == 'UNKNOWN').any():
+    if not (dim_article['ar_ref']=='UNKNOWN').any():
         dim_article = pd.concat([
-            pd.DataFrame([{'ar_ref':'UNKNOWN','famille_id':None}]),
+            pd.DataFrame([{'ar_ref':'UNKNOWN','famille_fk':None}]),
             dim_article
         ], ignore_index=True)
 
     dim_article = dim_article.merge(
-        dim_fam_a[['fa_codef', 'famille_id']],
-        left_on='famille_id', right_on='fa_codef', how='left'
+        dim_fam_a[['fa_codef','famille_id']],
+        left_on='famille_fk', right_on='fa_codef', how='left'
     )
-    dim_article = dim_article[['ar_ref', 'famille_id_y']]
-    dim_article.columns = ['ar_ref', 'famille_id']
-
-    unknown_id = dim_fam_a['famille_id'].min()
-    dim_article['famille_id'] = dim_article['famille_id'].fillna(unknown_id)
+    dim_article = dim_article[['ar_ref','famille_id']]
+    unknown_fam_id = dim_fam_a['famille_id'].min()
+    dim_article['famille_id'] = dim_article['famille_id'].fillna(unknown_fam_id).astype(int)
 
     dim_article['article_id'] = dim_article.index + 1
-    dim_article = dim_article[['article_id', 'ar_ref', 'famille_id']]
-    dim_article.to_csv(os.path.join(ACHATS_DIR, 'dim_article.csv'), index=False)
+    dim_article = dim_article[['article_id','ar_ref','famille_id']]
+    dim_article.to_csv(os.path.join(ACHATS_DIR,'dim_article.csv'),
+                       index=False, encoding='utf-8-sig')
 
+    # 4) Dimension mode d’expédition (dim_mode_expedition)
+    dim_mode = pd.DataFrame({
+        'code_expedit': get_col(df, 'Mode d\'expedition')
+    }).drop_duplicates().reset_index(drop=True)
+    # ajouter UNKNOWN
+    if not (dim_mode['code_expedit']=='UNKNOWN').any():
+        dim_mode = pd.concat([
+            pd.DataFrame([{'code_expedit':'UNKNOWN'}]), dim_mode
+        ], ignore_index=True)
+    dim_mode['code_expedit'] = dim_mode['code_expedit'].fillna('UNKNOWN')
+    dim_mode['libelle'] = dim_mode['code_expedit']  # même texte si pas de libellé distinct
+    dim_mode['mode_id'] = dim_mode.index + 1
+    dim_mode = dim_mode[['mode_id','code_expedit','libelle']]
+    dim_mode.to_csv(os.path.join(ACHATS_DIR,'dim_mode_expedition.csv'),
+                    index=False, encoding='utf-8-sig')
 
-    # 4) Dimension temps (dim_date)
-    # Utilise uniquement la date achat
+    # 5) Dimension docligne
+    dim_docl = pd.DataFrame({
+        'dl_piece':   get_col(df, 'Bon de commande'),
+        'dl_design':  get_col(df, 'Désignation'),
+        'fa_codef':   get_col(df, 'fa_codef'),      # à remplacer si champ diffère
+        'fa_central': get_col(df, 'fa_central'),
+        'fa_intitule':get_col(df, 'fa_intitule')
+    }).drop_duplicates().reset_index(drop=True)
+    # ajouter UNKNOWN
+    if not (dim_docl['dl_piece']=='UNKNOWN').any():
+        dim_docl = pd.concat([
+            pd.DataFrame([{
+                'dl_piece':'UNKNOWN',
+                'dl_design':'UNKNOWN',
+                'fa_codef':'UNKNOWN',
+                'fa_central':'UNKNOWN',
+                'fa_intitule':'UNKNOWN'
+            }]), dim_docl
+        ], ignore_index=True)
+    dim_docl[['dl_piece','dl_design','fa_codef','fa_central','fa_intitule']] = \
+        dim_docl[['dl_piece','dl_design','fa_codef','fa_central','fa_intitule']].fillna('UNKNOWN')
+    dim_docl['docligne_id'] = dim_docl.index + 1
+    dim_docl.to_csv(os.path.join(ACHATS_DIR,'docligne.csv'),
+                    index=False, encoding='utf-8-sig')
+
+    # 6) Dimension date (dim_date) avec UNKNOWN
     dates = df['date achat'].dropna().drop_duplicates().reset_index(drop=True)
     dim_date = pd.DataFrame({'date_full': dates})
+    # ajouter UNKNOWN
+    dim_date = pd.concat([
+        pd.DataFrame([{'date_full': pd.to_datetime('1900-01-01')}]),
+        dim_date
+    ], ignore_index=True)
+    dim_date['date_full'] = dim_date['date_full'].fillna(pd.to_datetime('1900-01-01'))
+    dim_date = dim_date.drop_duplicates(subset=['date_full']).reset_index(drop=True)
     dim_date['annee'] = dim_date['date_full'].dt.year
-    dim_date['mois'] = dim_date['date_full'].dt.month
-    dim_date['jour'] = dim_date['date_full'].dt.day
+    dim_date['mois']  = dim_date['date_full'].dt.month
+    dim_date['jour']  = dim_date['date_full'].dt.day
     dim_date['date_id'] = dim_date.index + 1
-    dim_date = dim_date[['date_id', 'date_full', 'annee', 'mois', 'jour']]
-    dim_date.to_csv(os.path.join(ACHATS_DIR, 'dim_date.csv'), index=False)
+    dim_date = dim_date[['date_id','date_full','annee','mois','jour']]
+    dim_date.to_csv(os.path.join(ACHATS_DIR,'dim_date.csv'),
+                    index=False, encoding='utf-8-sig')
 
-    # 5) Construction de la table de faits fact_achats
-    fact_a = pd.DataFrame({
-        'date_achat':      get_col(df, 'date achat'),
+    # 7) Construction de fact_achats
+    fact = pd.DataFrame({
+        'date_achat':       get_col(df, 'date achat'),
         'code_fournisseur': get_col(df, 'Code fournisseur'),
-        'ar_ref':          get_col(df, 'code article'),
-        'bon_de_commande': get_col(df, 'Bon de commande'),
-        'qte_fact':        get_col(df, 'Qté fact'),
-        'total_ht':        get_col(df, 'Total HT'),
-        'total_ttc':       get_col(df, 'Total TTC'),
-        'net_a_payer':     get_col(df, 'NET A PAYER')
+        'ar_ref':           get_col(df, 'code article'),
+        'code_expedit': get_col(df, "Mode d'expedition"),
+        'docligne_key':      get_col(df, 'Bon de commande'),
+        'bon_de_commande':  get_col(df, 'Bon de commande'),
+        'qte_fact':         get_col(df, 'Qté fact'),
+        'total_tva':        get_col(df, 'Total TVA'),
+        'total_ht':         get_col(df, 'Total HT'),
+        'total_ttc':        get_col(df, 'Total TTC'),
+        'net_a_payer':      get_col(df, 'NET A PAYER')
     })
 
-    # 5a) Jointure dim_date
-    fact_a = fact_a.merge(
-        dim_date[['date_full', 'date_id']],
-        left_on='date_achat', right_on='date_full', how='left'
-    ).drop(columns=['date_full'])
+    # merges et fillna pour toutes les FK
+    # a) dim_date
+    fact = fact.merge(dim_date[['date_full','date_id']],
+                      left_on='date_achat', right_on='date_full', how='left')
+    unknown_date_id = dim_date.loc[dim_date['date_full']==pd.to_datetime('1900-01-01'),
+                                   'date_id'].iloc[0]
+    fact['date_id'] = fact['date_id'].fillna(unknown_date_id).astype(int)
+    fact = fact.drop(columns=['date_full'])
 
-    # 5b) Jointure dim_fournisseur
-    fact_a = fact_a.merge(
-        dim_fourn[['code_fournisseur', 'dim_fournisseur_id']],
-        on='code_fournisseur', how='left'
+    # b) dim_fournisseur
+    fact = fact.merge(dim_fourn[['code_fournisseur','dim_fournisseur_id']],
+                      on='code_fournisseur', how='left')
+
+    # c) dim_article
+    fact = fact.merge(dim_article[['ar_ref','article_id']],
+                      on='ar_ref', how='left')
+    
+    # Récupérer l’ID de l’enregistrement « UNKNOWN »
+    unknown_article_id = dim_article['article_id'].min()
+
+    # Remplir les valeurs manquantes par cet ID pour garantir l’intégrité référentielle
+    fact['article_id'] = fact['article_id'].fillna(unknown_article_id).astype(int)
+
+    # d) dim_mode_expedition
+    fact = fact.merge(
+        dim_mode[['code_expedit','mode_id']],
+        on='code_expedit',
+        how='left'
     )
+    # remplir les valeurs manquantes
+    unknown_mode_id = dim_mode['mode_id'].min()
+    fact['mode_id'] = fact['mode_id'].fillna(unknown_mode_id).astype(int)
+    # on peut supprimer la colonne temporaire
+    fact = fact.drop(columns=['code_expedit'])
 
-    # 5c) Jointure dim_article
-    fact_a = fact_a.merge(
-        dim_article[['ar_ref', 'article_id']],
-        on='ar_ref', how='left'
+    # e) Merge pour la FK docligne
+    fact = fact.merge(
+        dim_docl[['dl_piece','docligne_id']],
+        left_on='docligne_key',    # utilise docligne_key ! 
+        right_on='dl_piece',
+        how='left'
     )
+    unknown_docl_id = dim_docl['docligne_id'].min()
+    fact['docligne_id'] = fact['docligne_id'].fillna(unknown_docl_id).astype(int)
+    # suppression de la clé temporaire
+    fact = fact.drop(columns=['docligne_key','dl_piece'])
 
-    # 6) Sélection colonnes finales
-    fact_achats = fact_a[[
-        'date_id', 'dim_fournisseur_id', 'article_id',
-        'bon_de_commande', 'qte_fact', 'total_ht', 'total_ttc', 'net_a_payer'
+    # 8) Sélection et export finale
+    fact_achats = fact[[
+        'date_id','dim_fournisseur_id','article_id','mode_id','docligne_id',
+        'bon_de_commande','qte_fact','total_tva','total_ht','total_ttc','net_a_payer'
     ]]
-    fact_achats.to_csv(os.path.join(ACHATS_DIR, 'fact_achats.csv'), index=False)
+    fact_achats.to_csv(os.path.join(ACHATS_DIR,'fact_achats.csv'),
+                       index=False, encoding='utf-8-sig')
 
 # Main
 def main():
