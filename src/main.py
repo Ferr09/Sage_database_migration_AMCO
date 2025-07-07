@@ -81,6 +81,7 @@ def ensure_supabase_config():
             return
         print(f"Suppression de l’ancien {cfg_file.name}…")
         cfg_file.unlink()
+        
     # création du fichier
     print("Configuration Supabase/PostgreSQL :")
     cfg = {

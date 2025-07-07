@@ -29,8 +29,6 @@ def load_supabase_config() -> dict:
 def connect_supabase(conf: dict) -> Client:
     return create_client(conf["url"], conf["key"])
 
-from postgrest import APIError
-
 def upload_csv(supabase: Client, csv_path: Path, schema: str, table: str):
     # 1) Chargement du CSV
     df = pd.read_csv(csv_path, dtype=str, encoding="utf-8-sig").where(pd.notnull, None)
@@ -54,17 +52,14 @@ def upload_csv(supabase: Client, csv_path: Path, schema: str, table: str):
         try:
             # Cas spécial : dim_famillesarticles utilise clé composée
             if table == "dim_famillesarticles":
-                df = df.drop_duplicates(
-                    subset=["code_famille","libelle_famille","libelle_sous_famille"]
-                )
+                df = df.drop_duplicates(subset=["libelle_sous_famille"])
                 records = df.to_dict(orient="records")
 
-                print(f"Upserting {len(records)} lignes dans {schema}.{table} (clé composée)…")
+                print(f"Upserting {len(records)} lignes dans {schema}.{table} (clé=libelle_sous_famille)…")
                 supabase.schema(schema) \
-                         .table(table) \
-                         .upsert(records,
-                                 on_conflict=["code_famille","libelle_famille","libelle_sous_famille"]) \
-                         .execute()
+                        .table(table) \
+                        .upsert(records, on_conflict="libelle_sous_famille") \
+                        .execute()
                 print(f"→ {len(records)} lignes upsertées dans {schema}.{table}.")
                 return
 
@@ -130,7 +125,7 @@ def main():
         "fact_achats.csv"
     ]:
         table = Path(fname).stem
-        upload_csv(supabase, achats_dir / fname, schema="achats", table=table)
+        # upload_csv(supabase, achats_dir / fname, schema="achats", table=table)
 
     print("→ Chargement en modèle étoile terminé avec succès !")
 

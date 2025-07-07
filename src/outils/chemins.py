@@ -65,6 +65,8 @@ chemin_vers_csv = dossier_chargement / "vers_csv.py" # Modifier/eliminer cette d
 dossier_statistiques = racine_projet / "statistiques"
 dossier_analyse_structure = dossier_statistiques / "analyse_structure_db"
 dossier_tables_statistiques = dossier_statistiques / "tables"
+dossier_resultats_jonctions = dossier_statistiques / "resultats_intersections"
+dossier_stats_resultats_jonctions = dossier_statistiques / "stats_resultats_intersections"
 
 # 3.6.1 Dossier pour les en-têtes extraites des fichiers CSV
 dossier_entetes = dossier_statistiques / "entetes"  # pour les en-têtes extraites
