@@ -55,35 +55,91 @@ def generer_csv_ventes_star():
     dim_client.to_csv(os.path.join(VENTES_DIR, 'dim_client.csv'), index=False)
     logging.info(f"dim_client.csv : {len(dim_client)} lignes")
 
-    # Dimension familles d'articles
+    # 1) Dimension familles d'articles (dim_famillesarticles)
     dim_fam = pd.DataFrame({
-        'code_famille': get_col(df, 'famille article libellé'),
-        'libelle_famille': get_col(df, 'famille article libellé'),
+        'code_famille':         get_col(df, 'famille article libellé'),
+        'libelle_famille':      get_col(df, 'famille article libellé'),
         'libelle_sous_famille': get_col(df, 'sous-famille article libellé')
     }).drop_duplicates().reset_index(drop=True)
+
+    # Insérer la ligne UNKNOWN si absente
+    if not (dim_fam['libelle_sous_famille']=='UNKNOWN').any():
+        dim_fam = pd.concat([
+            pd.DataFrame([{
+                'code_famille':         'UNKNOWN',
+                'libelle_famille':      'UNKNOWN',
+                'libelle_sous_famille': 'UNKNOWN'
+            }]),
+            dim_fam
+        ], ignore_index=True)
+
+    # Remplir les NaN
+    dim_fam[['code_famille','libelle_famille','libelle_sous_famille']] = \
+        dim_fam[['code_famille','libelle_famille','libelle_sous_famille']]\
+            .fillna('UNKNOWN')
+
+    # Dé-duplication sur la sous-famille (clé naturelle)
+    dim_fam = dim_fam.drop_duplicates(subset=['libelle_sous_famille'])\
+                     .reset_index(drop=True)
+
+    # Clé surrogate
     dim_fam['id_famille'] = dim_fam.index + 1
+
+    # Export : on garde maintenant les trois colonnes d’information
     dim_fam = dim_fam[['id_famille','code_famille','libelle_famille','libelle_sous_famille']]
-    dim_fam.to_csv(os.path.join(VENTES_DIR, 'dim_famillesarticles.csv'), index=False)
+    dim_fam.to_csv(os.path.join(VENTES_DIR,'dim_famillesarticles.csv'),
+                   index=False, encoding='utf-8-sig')
     logging.info(f"dim_famillesarticles.csv : {len(dim_fam)} lignes")
 
-    # Dimension articles
+
+    # 2) Dimension articles (dim_article)
     dim_article = pd.DataFrame({
-        'code_article': get_col(df, 'code article'),
-        'designation': get_col(df, 'Désignation'),
-        'numero_plan': get_col(df, 'Numéro de plan'),
-        'ref_article_client': get_col(df, 'Ref cde client'),
-        'id_famille_fk': get_col(df, 'famille article libellé')
-    })
-    # Autoriser multiples designations, enregistrer toutes combinaisons
-    dim_article = dim_article.drop_duplicates(subset=['code_article','designation','id_famille_fk'])
+        'code_article':         get_col(df, 'code article'),
+        'designation':          get_col(df, 'Désignation'),
+        'numero_plan':          get_col(df, 'Numéro de plan'),
+        'ref_article_client':   get_col(df, 'Ref cde client'),
+        'libelle_sous_famille': get_col(df, 'sous-famille article libellé')
+    }).drop_duplicates(subset=['code_article','designation','libelle_sous_famille'])\
+      .reset_index(drop=True)
+
+    # Remplir code_article manquant
+    dim_article['code_article'] = dim_article['code_article'].fillna('UNKNOWN')
+
+    # Merge pour récupérer id_famille depuis dim_fam
+    dim_article = dim_article.merge(
+        dim_fam[['libelle_sous_famille','id_famille']],
+        on='libelle_sous_famille',
+        how='left'
+    )
+
+    # Remplacer les id_famille manquants par celui de UNKNOWN
+    unknown_fam_id = dim_fam.loc[
+        dim_fam['libelle_sous_famille']=='UNKNOWN','id_famille'
+    ].iloc[0]
+    dim_article['id_famille'] = dim_article['id_famille'].fillna(unknown_fam_id).astype(int)
+
+    # Clé surrogate article
     dim_article['dim_article_id'] = dim_article.index + 1
-    dim_article = dim_article[['dim_article_id','code_article','designation','numero_plan','ref_article_client','id_famille_fk']]
-    dim_article.to_csv(os.path.join(VENTES_DIR, 'dim_article.csv'), index=False)
+
+    # Sélection et export
+    dim_article = dim_article[[
+        'dim_article_id','code_article','designation',
+        'numero_plan','ref_article_client','id_famille'
+    ]]
+    dim_article.to_csv(os.path.join(VENTES_DIR, 'dim_article.csv'),
+                       index=False,
+                       encoding='utf-8-sig')
     logging.info(f"dim_article.csv : {len(dim_article)} lignes")
 
     # Dimension temps journalier
     dates = pd.concat([df['Date BL'], df['date facture'], df['Date demandée client'], df['Date accusée AMCO']])
     dim_temps = pd.DataFrame({'date_cle': dates.dropna().drop_duplicates().reset_index(drop=True)})
+
+    dim_temps = pd.concat([
+        pd.DataFrame([{'date_cle': pd.to_datetime('1900-01-01')}]),
+        dim_temps
+    ], ignore_index=True)
+
     dim_temps['annee'] = dim_temps['date_cle'].dt.year
     dim_temps['mois'] = dim_temps['date_cle'].dt.month
     dim_temps['jour'] = dim_temps['date_cle'].dt.day
@@ -136,7 +192,19 @@ def generer_csv_ventes_star():
         dim_temps[['date_cle','dim_temps_id']],
         left_on='date_bl', right_on='date_cle',
         how='left'
-    ).drop(columns=['date_cle'])
+    )
+
+    # 5) Récupérer l’ID de la ligne UNKNOWN (date_cle = '1900-01-01')
+    unknown_date_id = dim_temps.loc[
+        dim_temps['date_cle'] == pd.to_datetime('1900-01-01'),
+        'dim_temps_id'
+    ].iloc[0]
+
+    # 6) Remplacer les NaN par unknown_date_id
+    fact['dim_temps_id'] = fact['dim_temps_id'].fillna(unknown_date_id).astype(int)
+
+    # 7) Vérification des mappings
+    fact = fact.drop(columns=['date_cle'])
 
     # On ne contrôle que les lignes où date_bl est non nulle
     mask_date = fact['date_bl'].notna()
@@ -172,14 +240,38 @@ def generer_csv_achats_star():
     # 1) Dimension fournisseurs (dim_fournisseur)
     # - code_fournisseur, raison_sociale, famille_fournisseur
     # - clés UNKNOWN gérées par Supabase
+    # 1) Dimension fournisseurs (dim_fournisseur)
     dim_fourn = pd.DataFrame({
-        'code_fournisseur': get_col(df, 'Code fournisseur'),
-        'raison_sociale':   get_col(df, 'Raison sociale'),
-        'famille_fournisseur': get_col(df, 'Famille du client')
-    }).drop_duplicates().reset_index(drop=True)
+        'code_fournisseur':    get_col(df, 'Code fournisseur'),
+        'raison_sociale':      get_col(df, 'Raison sociale'),
+        'famille_fournisseur': get_col(df, 'sous-famille article libellé')
+    })
+
+    # Remplacer les valeurs manquantes par 'UNKNOWN' pour respecter les contraintes de Supabase
+    dim_fourn['famille_fournisseur'] = dim_fourn['famille_fournisseur'].fillna('UNKNOWN')
+
+    # Suppression des doublons et réinitialisation de l’index
+    dim_fourn = dim_fourn.drop_duplicates().reset_index(drop=True)
+
+    # Ajout de la clé surrogate
     dim_fourn['dim_fournisseur_id'] = dim_fourn.index + 1
-    dim_fourn = dim_fourn[['dim_fournisseur_id', 'code_fournisseur', 'raison_sociale', 'famille_fournisseur']]
-    dim_fourn.to_csv(os.path.join(ACHATS_DIR, 'dim_fournisseur.csv'), index=False)
+
+    # Sélection des colonnes finales
+    dim_fourn = dim_fourn[[
+        'dim_fournisseur_id',
+        'code_fournisseur',
+        'raison_sociale',
+        'famille_fournisseur'
+    ]]
+
+    # Export CSV
+    dim_fourn.to_csv(
+        os.path.join(ACHATS_DIR, 'dim_fournisseur.csv'),
+        index=False,
+        encoding='utf-8-sig'
+    )
+    logging.info(f"dim_fournisseur.csv : {len(dim_fourn)} lignes")
+
 
     # 2) Dimension familles articles (dim_famille_article)
     dim_fam_a = pd.DataFrame({
@@ -187,6 +279,25 @@ def generer_csv_achats_star():
         'fa_central':     get_col(df, 'famille article libellé'),
         'fa_intitule':    get_col(df, 'sous-famille article libellé')
     }).drop_duplicates().reset_index(drop=True)
+
+    if not (dim_fam_a['fa_codef'] == 'UNKNOWN').any():
+        # On préfixe UNKNOWN pour qu’il devienne famille_id = 1
+        dim_fam_a = pd.concat([
+            pd.DataFrame([{
+                'fa_codef':    'UNKNOWN',
+                'fa_central':  'UNKNOWN',
+                'fa_intitule': 'UNKNOWN'
+            }]),
+            dim_fam_a
+        ], ignore_index=True)
+
+    # Remplir les éventuels NaN restants
+    dim_fam_a['fa_codef']   = dim_fam_a['fa_codef'].fillna('UNKNOWN')
+    dim_fam_a['fa_central'] = dim_fam_a['fa_central'].fillna('UNKNOWN')
+    dim_fam_a['fa_intitule']= dim_fam_a['fa_intitule'].fillna('UNKNOWN')
+
+    dim_fam_a = dim_fam_a.drop_duplicates(subset=['fa_codef','fa_central','fa_intitule']).reset_index(drop=True)
+
     dim_fam_a['famille_id'] = dim_fam_a.index + 1
     dim_fam_a = dim_fam_a[['famille_id', 'fa_codef', 'fa_central', 'fa_intitule']]
     dim_fam_a.to_csv(os.path.join(ACHATS_DIR, 'dim_famille_article.csv'), index=False)
@@ -196,15 +307,29 @@ def generer_csv_achats_star():
         'ar_ref':       get_col(df, 'code article'),
         'famille_id':   get_col(df, 'famille article libellé')
     }).drop_duplicates().reset_index(drop=True)
+
+    # Remplir les ar_ref manquants et s’assurer de la ligne UNKNOWN
+    dim_article['ar_ref'] = dim_article['ar_ref'].fillna('UNKNOWN')
+    if not (dim_article['ar_ref'] == 'UNKNOWN').any():
+        dim_article = pd.concat([
+            pd.DataFrame([{'ar_ref':'UNKNOWN','famille_id':None}]),
+            dim_article
+        ], ignore_index=True)
+
     dim_article = dim_article.merge(
         dim_fam_a[['fa_codef', 'famille_id']],
         left_on='famille_id', right_on='fa_codef', how='left'
     )
     dim_article = dim_article[['ar_ref', 'famille_id_y']]
     dim_article.columns = ['ar_ref', 'famille_id']
+
+    unknown_id = dim_fam_a['famille_id'].min()
+    dim_article['famille_id'] = dim_article['famille_id'].fillna(unknown_id)
+
     dim_article['article_id'] = dim_article.index + 1
     dim_article = dim_article[['article_id', 'ar_ref', 'famille_id']]
     dim_article.to_csv(os.path.join(ACHATS_DIR, 'dim_article.csv'), index=False)
+
 
     # 4) Dimension temps (dim_date)
     # Utilise uniquement la date achat
