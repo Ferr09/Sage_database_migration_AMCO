@@ -23,11 +23,13 @@ def _load_staging(table_name: str) -> pd.DataFrame:
     path = dossier_datalake_staging_sage / filename
     if not path.exists():
         raise FileNotFoundError(f"{path} non trouvé")
-    return pd.read_csv(path, dtype=str, encoding="utf-8-sig").fillna('')
-
+    df = pd.read_csv(path, dtype=str, encoding="utf-8-sig").fillna('')
+    df.columns = df.columns.str.strip() # Normalisation des noms de colonnes
+    return df
 
 def generer_ventes_simplifie():
-    """Génère le CSV de la table générale des ventes simplifiées."""
+    """Génère le CSV de la table générale des ventes simplifiées, incluant le code famille."""
+    logger.info("Début de la génération de la table générale des VENTES...")
     d = _load_staging("DOCLIGNE")
     a = _load_staging("ARTICLE")
     f = _load_staging("FAMILLE")
@@ -35,14 +37,14 @@ def generer_ventes_simplifie():
 
     df = (
         d
-        .merge(a[["AR_REF","FA_CODEFAMILLE"]], on="AR_REF", how="left", validate="many_to_one")
-        .merge(f[["FA_CODEFAMILLE","FA_CENTRAL","FA_INTITULE"]], on="FA_CODEFAMILLE", how="left", validate="many_to_one")
-        .merge(c[["CT_NUM","CT_INTITULE"]], on="CT_NUM", how="left", validate="many_to_one")
+        .merge(a[["AR_REF","FA_CODEFAMILLE"]], on="AR_REF", how="left")
+        .merge(f[["FA_CODEFAMILLE","FA_CENTRAL","FA_INTITULE"]], on="FA_CODEFAMILLE", how="left")
+        .merge(c[["CT_NUM","CT_INTITULE"]], on="CT_NUM", how="left")
     )
 
     champs = [
         "N° Ligne doc","Famille du client","Code client","Raison sociale",
-        "N° BL","Date BL","condition_livraison","Ref cde client","code article",
+        "N° BL","Date BL","condition_livraison","Ref cde client","code article", "Code Famille",
         "N° Cde","Désignation","famille article libellé",
         "sous-famille article libellé","Qté fact","Prix Unitaire","Tot HT",
         "Année","Mois","responsable du dossier","représentant","N° facture",
@@ -52,24 +54,34 @@ def generer_ventes_simplifie():
     data = {}
     for name in champs:
         if name == "N° Ligne doc":
-            data[name] = df["DL_NO"].astype(int)
+            data[name] = pd.to_numeric(df.get("DL_NO"), errors='coerce').astype('Int64')
         elif name == "N° Cde":
-            data[name] = df["DL_NO"].astype(int)
-        elif name in ("Qté fact","Prix Unitaire","Tot HT"):
-            clé = {"Qté fact":"DL_QTE","Prix Unitaire":"DL_PRIXUNITAIRE","Tot HT":"DL_MONTANTHT"}[name]
-            data[name] = pd.to_numeric(df[clé], errors="coerce")
+            data[name] = df.get("DO_PIECE")
+        elif name in ("Qté fact", "Prix Unitaire", "Tot HT"):
+            clé = {"Qté fact": "DL_QTE", "Prix Unitaire": "DL_PRIXUNITAIRE", "Tot HT": "DL_MONTANTHT"}[name]
+            data[name] = pd.to_numeric(df.get(clé), errors="coerce")
         elif name == "Année":
-            data[name] = pd.to_datetime(df["DO_DATE"], errors="coerce").dt.year.astype("Int64")
+            data[name] = pd.to_datetime(df.get("DO_DATE"), errors="coerce").dt.year.astype("Int64")
         elif name == "Mois":
-            data[name] = pd.to_datetime(df["DO_DATE"], errors="coerce").dt.month.astype("Int64")
+            data[name] = pd.to_datetime(df.get("DO_DATE"), errors="coerce").dt.month.astype("Int64")
         else:
             mapping = {
-                "Famille du client":"FA_CODEFAMILLE","Code client":"CT_NUM","Raison sociale":"CT_INTITULE",
-                "N° BL":"DL_PIECEBL","Date BL":"DL_DATEBL","Ref cde client":"AC_REFCLIENT",
-                "code article":"AR_REF","Désignation":"DL_DESIGN",
-                "famille article libellé":"FA_CENTRAL","sous-famille article libellé":"FA_INTITULE"
+                "Famille du client": "FA_CODEFAMILLE", 
+                "Code client": "CT_NUM",
+                "Raison sociale": "CT_INTITULE",
+                "N° BL": "DL_PIECEBL",
+                "Date BL": "DL_DATEBL",
+                "Ref cde client": "AC_REFCLIENT",
+                "code article": "AR_REF",
+                "Code Famille": "FA_CODEFAMILLE", 
+                "Désignation": "DL_DESIGN",
+                "famille article libellé": "FA_CENTRAL",
+                "sous-famille article libellé": "FA_INTITULE",
             }
-            data[name] = df[mapping[name]] if name in mapping and mapping[name] in df.columns else pd.NA
+            if name in mapping:
+                data[name] = df.get(mapping[name])
+            else:
+                 data[name] = pd.NA
 
     df_out = pd.DataFrame(data)
     os.makedirs(dossier_datalake_processed, exist_ok=True)
@@ -79,84 +91,96 @@ def generer_ventes_simplifie():
 
 
 def generer_achats_simplifie():
-    """Génère le CSV de la table générale des achats simplifiés."""
-    # 1) Chargement et filtrage de DOCENTETE
+    """
+    Génère la table générale des achats, incluant le code famille.
+    Chaque ligne représente un en-tête de document d'achat (DO_PIECE),
+    enrichi avec les informations de la première ligne d'article trouvée.
+    """
+    logger.info("Début de la génération de la table générale des ACHATS...")
+
     d_entete = _load_staging("DOCENTETE")
     c = _load_staging("COMPTET")
-    mask_achats = d_entete["INT_CATCOMPTA"].astype(str).str.startswith("Achats")
+    
+    mask_achats = d_entete["INT_CATCOMPTA"].astype(str).str.match(r"^Achats\b", case=False, na=False)
     d_achats = d_entete.loc[mask_achats].copy()
-    logger.info("DOCENTETE filtré (catégorie Achats) : %d lignes", len(d_achats))
+    d_achats['DO_PIECE'] = d_achats['DO_PIECE'].str.strip()
+    
+    df_entete = d_achats.merge(c.drop_duplicates(subset=["CT_NUMPAYEUR"]), on="CT_NUMPAYEUR", how="left")
+    df_entete_unique = df_entete.drop_duplicates(subset=['DO_PIECE'], keep='first').copy()
+    logger.info("En-têtes d'achat uniques à traiter : %d lignes", len(df_entete_unique))
 
-    # 2) Jointure avec COMPTET
-    df_entete = (
-        d_achats.merge(
-            c[[
-                "CT_NUMPAYEUR","CT_INTITULE","CT_CONTACT","CT_ADRESSE",
-                "CT_COMPLEMENT","CT_CODEPOSTAL","CT_VILLE",
-                "CT_TELEPHONE","CT_TELECOPIE"
-            ]],
-            on="CT_NUMPAYEUR",
-            how="left",
-            validate="many_to_one"
-        )
-    )
-    logger.info("Après merge avec COMPTET : %d lignes, %d colonnes", df_entete.shape[0], df_entete.shape[1])
-
-    # 3) Préparation de la table partielle DOCLIGNE + ARTICLE + FAMILLE
     d_ligne = _load_staging("DOCLIGNE")
     a = _load_staging("ARTICLE")
     f = _load_staging("FAMILLE")
-    df_ligne_par = (
-        d_ligne
-        .merge(a[["AR_REF","FA_CODEFAMILLE"]], on="AR_REF", how="left", validate="many_to_one")
-        .merge(f[["FA_CODEFAMILLE","FA_CENTRAL","FA_INTITULE"]], on="FA_CODEFAMILLE", how="left", validate="many_to_one")
+    
+    d_ligne_enrichie = d_ligne.merge(
+        a[["AR_REF","FA_CODEFAMILLE"]], on="AR_REF", how="left"
+    ).merge(
+        f[["FA_CODEFAMILLE","FA_CENTRAL","FA_INTITULE"]], on="FA_CODEFAMILLE", how="left"
     )
-
-    # 4) Détection de la colonne de pièce
-    if "DL_PIECE" in df_ligne_par.columns:
-        piece_col = "DL_PIECE"
-    elif "DO_PIECE" in df_ligne_par.columns:
-        piece_col = "DO_PIECE"
-    else:
-        raise KeyError("Aucune colonne de pièce ('DL_PIECE' ou 'DO_PIECE') trouvée dans DOCLIGNE")
-
-    # 5) Jointure entre ENTETE et table partielle
-    df_merge = (
-        df_entete
-        .merge(
-            df_ligne_par[[piece_col,"AR_REF","DL_DESIGN","FA_CENTRAL","FA_INTITULE"]],
-            left_on="DO_PIECE", right_on=piece_col,
-            how="left", validate="many_to_many"
-        )
+    d_ligne_enrichie['DO_PIECE'] = d_ligne_enrichie['DO_PIECE'].str.strip()
+    
+    df_ligne_premier = d_ligne_enrichie.drop_duplicates(subset=['DO_PIECE'], keep='first')
+    logger.info("Première ligne de détail extraite pour %d pièces uniques", len(df_ligne_premier))
+    
+    # --- CORRECTION: Utilisation de suffixes pour gérer les colonnes dupliquées ---
+    df_final = df_entete_unique.merge(
+        df_ligne_premier,
+        on='DO_PIECE',
+        how='left',
+        suffixes=('_entete', '_ligne')
     )
+    logger.info("Taille de la table finale après jointure 'left' : %d lignes", len(df_final))
 
-    # 6) Extraction année et mois de DO_DATE
-    df_merge["Année"] = pd.to_datetime(df_merge["DO_DATE"], errors="coerce").dt.year.astype("Int64")
-    df_merge["Mois"] = pd.to_datetime(df_merge["DO_DATE"], errors="coerce").dt.month.astype("Int64")
+    # --- CORRECTION: Utiliser les noms de colonnes avec suffixes ---
+    # La date de l'achat vient de l'en-tête, donc on utilise 'DO_DATE_entete'
+    df_final["Année"] = pd.to_datetime(df_final.get("DO_DATE_entete"), errors="coerce").dt.year.astype("Int64")
+    df_final["Mois"] = pd.to_datetime(df_final.get("DO_DATE_entete"), errors="coerce").dt.month.astype("Int64")
 
-    # 7) Sélection et renommage des colonnes finales
-    colonnes_a_garder = {
-        "DO_REF":"Reference achat","CT_NUMPAYEUR":"Code fournisseur",
-        "DO_DATE":"date achat","DO_PIECE":"Bon de commande",
-        "FNT_QUANTITES":"Qté fact","FNT_MONTANTTOTALTAXES":"Total TVA",
-        "FNT_TOTALHTNET":"Total HT","FNT_TOTALTTC":"Total TTC",
-        "FNT_NETAPAYER":"NET A PAYER","INT_EXPEDIT":"Mode d'expedition",
-        "CT_INTITULE":"Raison sociale","CT_CONTACT":"Contact","CT_ADRESSE":"Adresse",
-        "CT_COMPLEMENT":"Complement adresse","CT_CODEPOSTAL":"Code postal",
-        "CT_VILLE":"Ville","CT_TELEPHONE":"N° telephone","CT_TELECOPIE":"N° fax",
-        "AR_REF":"code article","DL_DESIGN":"Désignation",
-        "FA_CENTRAL":"famille article libellé","FA_INTITULE":"sous-famille article libellé",
-        "Année":"Année","Mois":"Mois"
+    data_export = {
+        "Reference achat": df_final.get("DO_REF_entete"),
+        "Code fournisseur": df_final.get("CT_NUMPAYEUR"),
+        "date achat": df_final.get("DO_DATE_entete"),
+        "Bon de commande": df_final.get("DO_PIECE"),
+        "Qté fact": pd.to_numeric(df_final.get("DL_QTE"), errors="coerce"),
+        "Total TVA": pd.to_numeric(df_final.get("FNT_MONTANTTOTALTAXES"), errors="coerce"),
+        "Total HT": pd.to_numeric(df_final.get("FNT_TOTALHTNET"), errors="coerce"),
+        "Total TTC": pd.to_numeric(df_final.get("FNT_TOTALTTC"), errors="coerce"),
+        "NET A PAYER": pd.to_numeric(df_final.get("FNT_NETAPAYER"), errors="coerce"),
+        "Mode d'expedition": df_final.get("INT_EXPEDIT"),
+        "Raison sociale": df_final.get("CT_INTITULE"),
+        "Contact": df_final.get("CT_CONTACT"),
+        "Adresse": df_final.get("CT_ADRESSE"),
+        "Complement adresse": df_final.get("CT_COMPLEMENT"),
+        "Code postal": df_final.get("CT_CODEPOSTAL"),
+        "Ville": df_final.get("CT_VILLE"),
+        "N° telephone": df_final.get("CT_TELEPHONE"),
+        "N° fax": df_final.get("CT_TELECOPIE"),
+        # Les infos de l'article viennent de la ligne, donc pas de suffixe si le nom est unique
+        "code article": df_final.get("AR_REF"), 
+        "Désignation": df_final.get("DL_DESIGN"),
+        "Code Famille": df_final.get("FA_CODEFAMILLE"),
+        "famille article libellé": df_final.get("FA_CENTRAL"),
+        "sous-famille article libellé": df_final.get("FA_INTITULE"),
+        "Année": df_final.get("Année"),
+        "Mois": df_final.get("Mois")
     }
-    df_out = df_merge[list(colonnes_a_garder.keys())].rename(columns=colonnes_a_garder)
 
-    # 8) Export CSV
+    df_export = pd.DataFrame(data_export)
+    
     os.makedirs(dossier_datalake_processed, exist_ok=True)
     sortie = dossier_datalake_processed / "tabla_generale_achats.csv"
-    df_out.to_csv(sortie, index=False, encoding="utf-8-sig")
-    logger.info("CSV Achats écrit : %s (%d lignes × %d colonnes)", sortie, *df_out.shape)
+    df_export.to_csv(sortie, index=False, encoding="utf-8-sig")
+    logger.info("CSV Achats (avec première ligne) écrit : %s (%d lignes × %d colonnes)", sortie, *df_export.shape)
 
 
 if __name__ == "__main__":
-    generer_ventes_simplifie()
-    generer_achats_simplifie()
+    try:
+        generer_ventes_simplifie()
+    except Exception as e:
+        logger.error(f"Erreur lors de la génération des ventes : {e}", exc_info=True)
+    
+    try:
+        generer_achats_simplifie()
+    except Exception as e:
+        logger.error(f"Erreur lors de la génération des achats : {e}", exc_info=True)
