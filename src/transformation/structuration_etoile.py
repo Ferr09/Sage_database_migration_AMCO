@@ -31,9 +31,9 @@ os.makedirs(ACHATS_DIR, exist_ok=True)
 
 # --- Fonctions Utilitaires ---
 def get_col(df, col_name):
-    """Retourne la colonne du DataFrame ou une série vide si elle n'existe pas."""
-    # Les noms de colonnes sont déjà nettoyés lors du chargement
-    return df[col_name] if col_name in df.columns else pd.Series(pd.NA, index=df.index)
+    """Retourne la colonne du DataFrame en nettoyant le nom de la colonne."""
+    col_name_cleaned = col_name.strip()
+    return df[col_name_cleaned] if col_name_cleaned in df.columns else pd.Series(pd.NA, index=df.index)
 
 def charger_et_nettoyer_csv(chemin_fichier, dates_a_parser=None, dayfirst_format=False):
     """Charge un CSV, normalise les noms de colonnes et gère les erreurs."""
@@ -45,7 +45,7 @@ def charger_et_nettoyer_csv(chemin_fichier, dates_a_parser=None, dayfirst_format
             low_memory=False,
             dayfirst=dayfirst_format
         )
-        df.columns = df.columns.str.strip() # Normalisation des noms
+        df.columns = df.columns.str.strip()
         logging.info(f"Fichier '{os.path.basename(chemin_fichier)}' chargé avec {len(df)} lignes.")
         return df
     except FileNotFoundError:
@@ -79,23 +79,26 @@ def generer_csv_ventes_star():
     dim_client['dim_client_id'] = dim_client.index + 1
     dim_client = dim_client[['dim_client_id', 'code_client', 'raison_sociale', 'famille_client', 'responsable_dossier', 'representant']]
     dim_client.to_csv(os.path.join(VENTES_DIR, 'dim_client.csv'), index=False, encoding='utf-8-sig')
+    logging.info(f"dim_client.csv généré avec {len(dim_client)} lignes.")
 
     # --- Dimension Familles d'Articles ---
     logging.info("Création de dim_famillesarticles...")
-    # --- CORRECTION : Utiliser 'Code Famille' comme clé naturelle ---
+    # *** CORRECTION : La clé naturelle est 'Code Famille' ***
     dim_fam_cols = {
         'code_famille': get_col(df, 'Code Famille'),
         'libelle_famille': get_col(df, 'famille article libellé'),
         'libelle_sous_famille': get_col(df, 'sous-famille article libellé')
     }
-    dim_fam = pd.DataFrame(dim_fam_cols).fillna('UNKNOWN').dropna(subset=['code_famille'])
-    dim_fam = dim_fam.drop_duplicates(subset=['code_famille']).reset_index(drop=True)
-    if 'UNKNOWN' not in dim_fam['code_famille'].values:
-        unknown_row = pd.DataFrame([{'code_famille': 'UNKNOWN', 'libelle_famille': 'UNKNOWN', 'libelle_sous_famille': 'UNKNOWN'}])
-        dim_fam = pd.concat([dim_fam, unknown_row], ignore_index=True)
+    dim_fam = pd.DataFrame(dim_fam_cols).dropna(subset=['code_famille'])
+    dim_fam = dim_fam.drop_duplicates(subset=['code_famille'])
+    # Logique robuste pour la ligne UNKNOWN
+    dim_fam = dim_fam[dim_fam['code_famille'] != 'UNKNOWN']
+    unknown_row = pd.DataFrame([{'code_famille': 'UNKNOWN', 'libelle_famille': 'UNKNOWN', 'libelle_sous_famille': 'UNKNOWN'}])
+    dim_fam = pd.concat([unknown_row, dim_fam], ignore_index=True)
     dim_fam['id_famille'] = dim_fam.index + 1
     dim_fam = dim_fam[['id_famille', 'code_famille', 'libelle_famille', 'libelle_sous_famille']]
     dim_fam.to_csv(os.path.join(VENTES_DIR, 'dim_famillesarticles.csv'), index=False, encoding='utf-8-sig')
+    logging.info(f"dim_famillesarticles.csv généré avec {len(dim_fam)} lignes.")
 
     # --- Dimension Articles ---
     logging.info("Création de dim_article...")
@@ -104,12 +107,12 @@ def generer_csv_ventes_star():
         'designation': get_col(df, 'Désignation'),
         'numero_plan': get_col(df, 'Numéro de plan'),
         'ref_article_client': get_col(df, 'Ref cde client'),
-        'code_famille': get_col(df, 'Code Famille') # Utiliser le code pour la jointure
+        'code_famille': get_col(df, 'Code Famille') # Clé pour la jointure
     }
     dim_article = pd.DataFrame(dim_article_cols).dropna(subset=['code_article'])
     dim_article = dim_article.drop_duplicates(subset=['code_article']).reset_index(drop=True)
     
-    # --- CORRECTION : Jointure pour obtenir l'ID de la famille via 'code_famille' ---
+    # *** CORRECTION : Jointure sur 'code_famille' ***
     dim_article['code_famille'].fillna('UNKNOWN', inplace=True)
     unknown_fam_id = dim_fam.loc[dim_fam['code_famille'] == 'UNKNOWN', 'id_famille'].iloc[0]
     dim_article = dim_article.merge(dim_fam[['code_famille', 'id_famille']], on='code_famille', how='left')
@@ -122,6 +125,7 @@ def generer_csv_ventes_star():
     dim_article['dim_article_id'] = dim_article.index + 1
     dim_article = dim_article[['dim_article_id', 'code_article', 'designation', 'numero_plan', 'ref_article_client', 'id_famille']]
     dim_article.to_csv(os.path.join(VENTES_DIR, 'dim_article.csv'), index=False, encoding='utf-8-sig')
+    logging.info(f"dim_article.csv généré avec {len(dim_article)} lignes.")
 
     # --- Dimension Temps ---
     logging.info("Création de dim_temps...")
@@ -136,7 +140,8 @@ def generer_csv_ventes_star():
     dim_temps['dim_temps_id'] = dim_temps.index + 1
     dim_temps = dim_temps[['dim_temps_id', 'date_cle', 'annee', 'mois', 'jour']]
     dim_temps.to_csv(os.path.join(VENTES_DIR, 'dim_temps.csv'), index=False)
-
+    logging.info(f"dim_temps.csv généré avec {len(dim_temps)} lignes.")
+    
     # --- Table des Faits : Ventes ---
     logging.info("Construction de fact_ventes...")
     fact_cols = {
@@ -160,6 +165,7 @@ def generer_csv_ventes_star():
     fact_ventes = fact[['dl_no', 'date_bl', 'num_bl', 'condition_livraison', 'date_demandee_client', 'date_accusee_amco', 'num_facture', 'date_facture', 'qte_vendue', 'prix_unitaire', 'montant_ht', 'dim_client_id', 'dim_article_id', 'dim_temps_id']]
     fact_ventes.to_csv(os.path.join(VENTES_DIR, 'fact_ventes.csv'), index=False, encoding='utf-8-sig')
     logging.info(f"fact_ventes.csv généré avec {len(fact_ventes)} lignes. Processus VENTES terminé.")
+
 
 # =============================================================================
 # MODÈLE EN ÉTOILE POUR LES ACHATS
@@ -189,17 +195,18 @@ def generer_csv_achats_star():
 
     # --- Dimension Familles d'Articles (Achats) ---
     logging.info("Création de dim_famille_article...")
-    # --- CORRECTION : Utiliser 'Code Famille' comme clé naturelle ---
+    # *** CORRECTION : La clé naturelle est 'Code Famille' ***
     dim_fam_achats_cols = {
         'code_famille': get_col(df, 'Code Famille'),
         'libelle_famille': get_col(df, 'famille article libellé'),
         'libelle_sous_famille': get_col(df, 'sous-famille article libellé')
     }
-    dim_fam_achats = pd.DataFrame(dim_fam_achats_cols).fillna('UNKNOWN').dropna(subset=['code_famille'])
-    dim_fam_achats = dim_fam_achats.drop_duplicates(subset=['code_famille']).reset_index(drop=True)
-    if 'UNKNOWN' not in dim_fam_achats['code_famille'].values:
-        unknown_row = pd.DataFrame([{'code_famille': 'UNKNOWN', 'libelle_famille': 'UNKNOWN', 'libelle_sous_famille': 'UNKNOWN'}])
-        dim_fam_achats = pd.concat([dim_fam_achats, unknown_row], ignore_index=True)
+    dim_fam_achats = pd.DataFrame(dim_fam_achats_cols).dropna(subset=['code_famille'])
+    dim_fam_achats = dim_fam_achats.drop_duplicates(subset=['code_famille'])
+    # Logique robuste pour la ligne UNKNOWN
+    dim_fam_achats = dim_fam_achats[dim_fam_achats['code_famille'] != 'UNKNOWN']
+    unknown_row_achats = pd.DataFrame([{'code_famille': 'UNKNOWN', 'libelle_famille': 'UNKNOWN', 'libelle_sous_famille': 'UNKNOWN'}])
+    dim_fam_achats = pd.concat([unknown_row_achats, dim_fam_achats], ignore_index=True)
     dim_fam_achats['famille_id'] = dim_fam_achats.index + 1
     dim_fam_achats = dim_fam_achats[['famille_id', 'code_famille', 'libelle_famille', 'libelle_sous_famille']]
     dim_fam_achats.to_csv(os.path.join(ACHATS_DIR, 'dim_famille_article.csv'), index=False, encoding='utf-8-sig')
@@ -209,12 +216,12 @@ def generer_csv_achats_star():
     dim_article_cols = {
         'ar_ref': get_col(df, 'code article').str.strip(),
         'designation': get_col(df, 'Désignation'),
-        'code_famille': get_col(df, 'Code Famille') # Utiliser le code pour la jointure
+        'code_famille': get_col(df, 'Code Famille') # Clé pour la jointure
     }
     dim_article = pd.DataFrame(dim_article_cols).dropna(subset=['ar_ref'])
     dim_article = dim_article.drop_duplicates(subset=['ar_ref']).reset_index(drop=True)
     
-    # --- CORRECTION : Jointure avec dim_fam_achats sur 'code_famille' ---
+    # *** CORRECTION : Jointure sur 'code_famille' ***
     dim_article['code_famille'].fillna('UNKNOWN', inplace=True)
     unknown_fam_id_achats = dim_fam_achats.loc[dim_fam_achats['code_famille'] == 'UNKNOWN', 'famille_id'].iloc[0]
     dim_article = dim_article.merge(dim_fam_achats[['code_famille', 'famille_id']], on='code_famille', how='left')
