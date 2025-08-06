@@ -154,15 +154,60 @@ def generer_csv_achats_star():
 
     # --- 2. Dimension: dim_article (Achats) ---
     logging.info("Création de achats/dim_article.csv")
-    dim_art_achats_base = df[['code article', 'Code Famille']].rename(columns={'code article': 'ar_ref', 'Code Famille': 'fa_codef'}).dropna(subset=['ar_ref']).drop_duplicates(subset=['ar_ref']).reset_index(drop=True)
+
+    # ÉTAPE 1: Sélectionner toutes les colonnes nécessaires depuis la table générale
+    colonnes_article = [
+        'code article', 
+        'Désignation',
+        'Code Famille',
+    ]
+    colonnes_a_garder = [col for col in colonnes_article if col in df.columns]
+
+    # CORRECTION 1: On ajoute .copy() pour garantir qu'on travaille sur un nouveau DataFrame
+    dim_art_achats_base = df[colonnes_a_garder].copy()
+
+    # ÉTAPE 2: Nettoyer et dédoublonner
+    dim_art_achats_base = dim_art_achats_base.dropna(subset=['code article'])
+    dim_art_achats_base = dim_art_achats_base.drop_duplicates(subset=['code article'], keep='first').reset_index(drop=True)
+
+    # ÉTAPE 3: Renommer les colonnes
+    dim_art_achats_base = dim_art_achats_base.rename(columns={
+        'code article': 'ar_ref',
+        'Désignation': 'ar_designation',
+        'Code Famille': 'fa_codef',
+    })
+
+    # ÉTAPE 4: Joindre avec la dimension famille et GÉRER LES NULS de manière robuste
     dim_art_achats_base = dim_art_achats_base.merge(dim_fam_achats[['fa_codef', 'famille_id']], on='fa_codef', how='left')
-    dim_art_achats_base['famille_id'].fillna(ID_INCONNU, inplace=True)
-    
-    valeurs_inconnues_art_a = {'ar_ref': VALEUR_CODE_INCONNU, 'famille_id': ID_INCONNU}
-    dim_article_achats = creer_dimension_avec_inconnu(dim_art_achats_base.drop(columns=['fa_codef']), 'article_id', valeurs_inconnues_art_a)
+
+    # CORRECTION 2: Remplacer les nuls de manière sûre, sans 'inplace=True'
+    dim_art_achats_base['famille_id'] = dim_art_achats_base['famille_id'].fillna(ID_INCONNU)
+
+    # ÉTAPE 5: Ajouter la ligne "Inconnu" et créer la clé primaire "article_id"
+    valeurs_inconnues_art_a = {
+        'ar_ref': VALEUR_CODE_INCONNU, 
+        'ar_designation': 'Inconnu',
+        # CORRECTION 3: La ligne "inconnu" doit aussi avoir une 'famille_id'
+        'famille_id': ID_INCONNU 
+    }
+    # On retire fa_codef qui n'est plus utile avant de créer la dimension finale
+    dim_article_achats = creer_dimension_avec_inconnu(
+        dim_art_achats_base.drop(columns=['fa_codef']), 
+        'article_id', 
+        valeurs_inconnues_art_a
+    )
     dim_article_achats['famille_id'] = dim_article_achats['famille_id'].astype('Int64')
-    dim_article_achats_final = dim_article_achats[['article_id', 'ar_ref', 'famille_id']]
+
+    # ÉTAPE 6: Sélectionner les colonnes finales et sauvegarder
+    dim_article_achats_final = dim_article_achats[[
+        'article_id', 
+        'ar_ref', 
+        'ar_designation',
+        'famille_id'
+    ]]
     dim_article_achats_final.to_csv(os.path.join(ACHATS_DIR, 'dim_article.csv'), index=False, encoding='utf-8-sig')
+
+    logging.info(f"Fichier achats/dim_article.csv créé avec {len(dim_article_achats_final)} lignes et les colonnes descriptives.")
 
     # --- 3. Dimension: dim_fournisseur ---
     logging.info("Création de achats/dim_fournisseur.csv")

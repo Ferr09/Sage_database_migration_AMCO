@@ -64,12 +64,26 @@ TABLE_CONFIGS = {
         # CORRIGÉ : Ajout de 'famille_id'
         'final_db_columns': ['famille_id', 'fa_codef', 'fa_central', 'fa_intitule']
     },
+    
     'dim_article_achats': {
-        'table_name': 'dim_article', 'schema': 'achats', 'natural_key_db': 'ar_ref',
-        'rename_map': {'ar_ref': 'ar_ref', 'famille_id': 'famille_id'},
-        # CORRECT : 'article_id' était déjà présent
-        'final_db_columns': ['article_id', 'ar_ref', 'famille_id']
+        'table_name': 'dim_article', 
+        'schema': 'achats', 
+        'natural_key_db': 'ar_ref',
+        'rename_map': {
+            # On ne mappe QUE les colonnes qui existent dans le CSV et la table de destination
+            'ar_ref': 'ar_ref', 
+            'ar_designation': 'ar_designation', # Cette colonne existe bien dans dim_article
+            'famille_id': 'famille_id'
+        },
+        
+        'final_db_columns': [
+            'article_id', 
+            'ar_ref', 
+            'ar_designation', # On garde la désignation qui appartient bien à l'article
+            'famille_id'      # On garde la clé étrangère vers la table des familles
+        ]
     },
+
     'dim_date': {
         'schema': 'achats', 'natural_key_db': 'date_full',
         'rename_map': None,
