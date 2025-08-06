@@ -42,6 +42,32 @@ def generer_ventes_simplifie():
         .merge(c[["CT_NUM","CT_INTITULE"]], on="CT_NUM", how="left")
     )
 
+    logger.info("Enrichissement des familles d'articles manquantes...")
+    
+    # Dictionnaire de mappage : {sous-famille -> famille correcte}
+    mappage_familles = {
+        'THERMODUR FINITION': 'FABR',
+        'DECOUPE A PARTIR PLAQUES MOULEES': 'FABR',
+        'THERMOPLASTIQUE FINITION': 'FABR',
+        'COLLECTION': 'ACHA',
+        'NEGOCE ET FINITION DECOUPE': 'FABR',  # Priorité à la fabrication
+        'PLAQUES MOULEES POUR LA NEGOCE': 'NEGO'
+    }
+
+    # On s'assure que les colonnes sont bien des chaînes de caractères pour la comparaison
+    df['FA_CENTRAL'] = df['FA_CENTRAL'].astype(str).str.strip()
+    df['FA_INTITULE'] = df['FA_INTITULE'].astype(str).str.strip()
+
+    # On trouve les lignes où la famille est vide/nulle mais où la sous-famille existe
+    masque_enrichissement = (df['FA_CENTRAL'].isin(['', 'nan', 'None'])) & (df['FA_INTITULE'].isin(mappage_familles.keys()))
+    
+    # On applique le mappage sur ces lignes
+    df.loc[masque_enrichissement, 'FA_CENTRAL'] = df.loc[masque_enrichissement, 'FA_INTITULE'].map(mappage_familles)
+    
+    lignes_modifiees = masque_enrichissement.sum()
+    if lignes_modifiees > 0:
+        logger.info(f"{lignes_modifiees} lignes ont été enrichies avec une famille d'article.")
+
     champs = [
         "N° Ligne doc","Famille du client","Code client","Raison sociale",
         "N° BL","Date BL","condition_livraison","Ref cde client","code article", "Code Famille",
