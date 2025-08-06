@@ -47,7 +47,7 @@ def generer_ventes_simplifie():
         "N° BL","Date BL","condition_livraison","Ref cde client","code article", "Code Famille",
         "N° Cde","Désignation","famille article libellé",
         "sous-famille article libellé","Qté fact","Prix Unitaire","Tot HT",
-        "Année","Mois","responsable du dossier","représentant","N° facture",
+        "Année","Mois","responsable du dossier","representant","N° facture",
         "date facture","Date demandée client","Date accusée AMCO","Numéro de plan"
     ]
 

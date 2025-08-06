@@ -77,20 +77,43 @@ def nettoyer_et_exporter_csv(chemin_csv: Path, nom_table: str):
         df_clean = df.dropna(how='all')
         df_clean = df_clean.loc[~(df_clean.isna() | (df_clean == 0)).all(axis=1)]
 
-        # Cas particulier : F_DOCLIGNE → éliminer les lignes sans AC_REFCLIENT et AF_REFFOURNISS
+# --- Début de la correction ---
+
+        # Cas particulier : F_DOCLIGNE
         if nom_table == "F_DOCLIGNE":
             # On s'assure que les colonnes existent
             if {"AC_REFCLIENT","AF_REFFOURNISS"}.issubset(df_clean.columns):
                 avant = len(df_clean)
                 # Condition de suppression : les deux champs simultanément manquants ou vides
                 mask_ref_vides = (
-                    df_clean["AC_REFCLIENT"].isna() | (df_clean["AC_REFCLIENT"].astype(str).str.strip() == "")
-                ) & (
-                    df_clean["AF_REFFOURNISS"].isna() | (df_clean["AF_REFFOURNISS"].astype(str).str.strip() == "")
+                    (df_clean["AC_REFCLIENT"].isna() | (df_clean["AC_REFCLIENT"].astype(str).str.strip() == ""))
+                    &
+                    (df_clean["AF_REFFOURNISS"].isna() | (df_clean["AF_REFFOURNISS"].astype(str).str.strip() == ""))
                 )
                 df_clean = df_clean[~mask_ref_vides]
                 suppr = avant - len(df_clean)
                 print(f"{nom_table} : {suppr} ligne(s) sans AC_REFCLIENT ni AF_REFFOURNISS supprimée(s)")
+
+            # --- NOUVEAU : Conversion des colonnes en types numériques corrects ---
+            colonnes_a_convertir = {
+                'DL_QTE': 'Int64',
+                'DL_QTEBC': 'Int64',
+                'DL_PIECEBC': 'Int64', # Si ce sont des numéros, sinon commenter cette ligne
+                'DL_PIECEBL': 'Int64'  # Si ce sont des numéros, sinon commenter cette ligne
+                # Ajoutez d'autres colonnes numériques si nécessaire
+            }
+
+            print(f"Conversion des types pour {nom_table}...")
+            for col, type_cible in colonnes_a_convertir.items():
+                if col in df_clean.columns:
+                    # pd.to_numeric gère les chaînes de caractères comme "964.0"
+                    # errors='coerce' transforme les valeurs non-valides en NaT/NaN
+                    # .astype(type_cible) convertit au format entier de pandas qui supporte les nuls
+                    df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce').astype(type_cible)
+                    print(f"  - Colonne '{col}' convertie en {type_cible}.")
+                else:
+                    print(f"  - AVERTISSEMENT : Colonne '{col}' non trouvée, conversion ignorée.")
+
 
         # Cas particulier : F_ARTFOURNISS …
         if nom_table == "F_ARTFOURNISS" and "AF_REFFOURNISS" in df_clean.columns:

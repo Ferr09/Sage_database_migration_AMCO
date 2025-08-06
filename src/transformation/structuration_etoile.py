@@ -22,6 +22,12 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
+# --- CONSTANTES POUR LA GESTION DES VALEURS INCONNUES (en français) ---
+ID_INCONNU = 1
+VALEUR_TEXTE_INCONNU = "Inconnu"
+VALEUR_CODE_INCONNU = "INC" # Pour "Inconnu"
+DATE_INCONNUE = pd.Timestamp('1900-01-01')
+
 # Répertoires de sortie
 VENTES_DIR = os.path.join(dossier_datalake_processed, "ventes")
 ACHATS_DIR = os.path.join(dossier_datalake_processed, "achats")
@@ -30,11 +36,6 @@ os.makedirs(VENTES_DIR, exist_ok=True)
 os.makedirs(ACHATS_DIR, exist_ok=True)
 
 # --- Fonctions Utilitaires ---
-def get_col(df, col_name):
-    """Retourne la colonne du DataFrame en nettoyant le nom de la colonne."""
-    col_name_cleaned = col_name.strip()
-    return df[col_name_cleaned] if col_name_cleaned in df.columns else pd.Series(pd.NA, index=df.index)
-
 def charger_et_nettoyer_csv(chemin_fichier, dates_a_parser=None, dayfirst_format=False):
     """Charge un CSV, normalise les noms de colonnes et gère les erreurs."""
     try:
@@ -52,231 +53,175 @@ def charger_et_nettoyer_csv(chemin_fichier, dates_a_parser=None, dayfirst_format
         logging.error(f"Le fichier '{os.path.basename(chemin_fichier)}' n'a pas été trouvé. Processus interrompu.")
         return None
 
+def creer_dimension_avec_inconnu(df_base, nom_id, valeurs_inconnues):
+    """
+    Ajoute une ligne 'Inconnu' à un DataFrame de dimension et lui assigne un ID.
+    """
+    df_inconnu = pd.DataFrame([valeurs_inconnues])
+    df_final = pd.concat([df_inconnu, df_base], ignore_index=True)
+    df_final[nom_id] = df_final.index + 1
+    return df_final
+
 # =============================================================================
 # MODÈLE EN ÉTOILE POUR LES VENTES
 # =============================================================================
 def generer_csv_ventes_star():
-    """Génère les fichiers CSV pour le modèle en étoile des ventes."""
-    logging.info("Début de la génération du modèle en étoile pour les VENTES.")
-    
-    df = charger_et_nettoyer_csv(
-        os.path.join(dossier_datalake_processed, 'tabla_generale_ventes.csv'),
-        dates_a_parser=['Date BL', 'Date demandée client', 'Date accusée AMCO', 'date facture']
-    )
+    logging.info("Génération du modèle en étoile pour les VENTES...")
+    df = charger_et_nettoyer_csv(os.path.join(dossier_datalake_processed, 'tabla_generale_ventes.csv'), dates_a_parser=['Date BL', 'date facture'])
     if df is None: return
 
-    # --- Dimension Clients ---
-    logging.info("Création de dim_client...")
-    dim_client_cols = {
-        'code_client': get_col(df, 'Code client'),
-        'raison_sociale': get_col(df, 'Raison sociale'),
-        'famille_client': get_col(df, 'Famille du client'),
-        'responsable_dossier': get_col(df, 'responsable du dossier'),
-        'representant': get_col(df, 'représentant')
-    }
-    dim_client = pd.DataFrame(dim_client_cols).dropna(subset=['code_client'])
-    dim_client = dim_client.drop_duplicates(subset=['code_client']).reset_index(drop=True)
-    dim_client['dim_client_id'] = dim_client.index + 1
-    dim_client = dim_client[['dim_client_id', 'code_client', 'raison_sociale', 'famille_client', 'responsable_dossier', 'representant']]
-    dim_client.to_csv(os.path.join(VENTES_DIR, 'dim_client.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"dim_client.csv généré avec {len(dim_client)} lignes.")
-
-    # --- Dimension Familles d'Articles ---
-    logging.info("Création de dim_famillesarticles...")
-    # *** CORRECTION : La clé naturelle est 'Code Famille' ***
-    dim_fam_cols = {
-        'code_famille': get_col(df, 'Code Famille'),
-        'libelle_famille': get_col(df, 'famille article libellé'),
-        'libelle_sous_famille': get_col(df, 'sous-famille article libellé')
-    }
-    dim_fam = pd.DataFrame(dim_fam_cols).dropna(subset=['code_famille'])
-    dim_fam = dim_fam.drop_duplicates(subset=['code_famille'])
-    # Logique robuste pour la ligne UNKNOWN
-    dim_fam = dim_fam[dim_fam['code_famille'] != 'UNKNOWN']
-    unknown_row = pd.DataFrame([{'code_famille': 'UNKNOWN', 'libelle_famille': 'UNKNOWN', 'libelle_sous_famille': 'UNKNOWN'}])
-    dim_fam = pd.concat([unknown_row, dim_fam], ignore_index=True)
-    dim_fam['id_famille'] = dim_fam.index + 1
-    dim_fam = dim_fam[['id_famille', 'code_famille', 'libelle_famille', 'libelle_sous_famille']]
+    # --- 1. Dimension: dim_famillesarticles ---
+    logging.info("Création de ventes/dim_famillesarticles.csv")
+    dim_fam_base = df[['Code Famille', 'famille article libellé', 'sous-famille article libellé']].rename(columns={'Code Famille': 'code_famille', 'famille article libellé': 'libelle_famille', 'sous-famille article libellé': 'libelle_sous_famille'}).dropna(subset=['code_famille']).drop_duplicates(subset=['code_famille']).reset_index(drop=True)
+    valeurs_inconnues_fam = {'code_famille': VALEUR_CODE_INCONNU, 'libelle_famille': VALEUR_TEXTE_INCONNU, 'libelle_sous_famille': VALEUR_TEXTE_INCONNU}
+    dim_fam = creer_dimension_avec_inconnu(dim_fam_base, 'id_famille', valeurs_inconnues_fam)
     dim_fam.to_csv(os.path.join(VENTES_DIR, 'dim_famillesarticles.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"dim_famillesarticles.csv généré avec {len(dim_fam)} lignes.")
 
-    # --- Dimension Articles ---
-    logging.info("Création de dim_article...")
-    dim_article_cols = {
-        'code_article': get_col(df, 'code article').str.strip(),
-        'designation': get_col(df, 'Désignation'),
-        'numero_plan': get_col(df, 'Numéro de plan'),
-        'ref_article_client': get_col(df, 'Ref cde client'),
-        'code_famille': get_col(df, 'Code Famille') # Clé pour la jointure
-    }
-    dim_article = pd.DataFrame(dim_article_cols).dropna(subset=['code_article'])
-    dim_article = dim_article.drop_duplicates(subset=['code_article']).reset_index(drop=True)
+    # --- 2. Dimension: dim_article (dépend de dim_famillesarticles) ---
+    logging.info("Création de ventes/dim_article.csv")
+    dim_article_base = df[['code article', 'Désignation', 'Code Famille']].rename(columns={'code article': 'code_article', 'Désignation': 'designation', 'Code Famille': 'code_famille'}).dropna(subset=['code_article']).drop_duplicates(subset=['code_article']).reset_index(drop=True)
+    dim_article_base = dim_article_base.merge(dim_fam[['code_famille', 'id_famille']], on='code_famille', how='left')
+    dim_article_base['id_famille'].fillna(ID_INCONNU, inplace=True) # Gérer les articles sans famille
     
-    # *** CORRECTION : Jointure sur 'code_famille' ***
-    dim_article['code_famille'].fillna('UNKNOWN', inplace=True)
-    unknown_fam_id = dim_fam.loc[dim_fam['code_famille'] == 'UNKNOWN', 'id_famille'].iloc[0]
-    dim_article = dim_article.merge(dim_fam[['code_famille', 'id_famille']], on='code_famille', how='left')
-    dim_article['id_famille'].fillna(unknown_fam_id, inplace=True)
-    dim_article['id_famille'] = dim_article['id_famille'].astype(int)
+    valeurs_inconnues_art = {'code_article': VALEUR_CODE_INCONNU, 'designation': VALEUR_TEXTE_INCONNU, 'id_famille': ID_INCONNU}
+    dim_article = creer_dimension_avec_inconnu(dim_article_base.drop(columns=['code_famille']), 'dim_article_id', valeurs_inconnues_art)
+    dim_article['id_famille'] = dim_article['id_famille'].astype('Int64')
+    dim_article[['dim_article_id', 'code_article', 'designation', 'id_famille']].to_csv(os.path.join(VENTES_DIR, 'dim_article.csv'), index=False, encoding='utf-8-sig')
 
-    if 'UNKNOWN' not in dim_article['code_article'].values:
-        unknown_row = pd.DataFrame([{'code_article': 'UNKNOWN', 'designation': 'UNKNOWN', 'numero_plan': 'UNKNOWN', 'ref_article_client': 'UNKNOWN', 'id_famille': unknown_fam_id}])
-        dim_article = pd.concat([dim_article, unknown_row], ignore_index=True)
-    dim_article['dim_article_id'] = dim_article.index + 1
-    dim_article = dim_article[['dim_article_id', 'code_article', 'designation', 'numero_plan', 'ref_article_client', 'id_famille']]
-    dim_article.to_csv(os.path.join(VENTES_DIR, 'dim_article.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"dim_article.csv généré avec {len(dim_article)} lignes.")
+    # --- 3. Dimension: dim_client ---
+    logging.info("Création de ventes/dim_client.csv")
+    dim_client_base = df[['Code client', 'Raison sociale']].rename(columns={'Code client': 'code_client', 'Raison sociale': 'raison_sociale'}).dropna(subset=['code_client']).drop_duplicates(subset=['code_client']).reset_index(drop=True)
+    valeurs_inconnues_cli = {'code_client': VALEUR_CODE_INCONNU, 'raison_sociale': VALEUR_TEXTE_INCONNU, 'famille_client': VALEUR_TEXTE_INCONNU, 'responsable_dossier': VALEUR_TEXTE_INCONNU, 'representant': VALEUR_TEXTE_INCONNU}
+    for col in valeurs_inconnues_cli.keys():
+        if col not in dim_client_base.columns:
+            dim_client_base[col] = pd.NA
+    dim_client = creer_dimension_avec_inconnu(dim_client_base, 'dim_client_id', valeurs_inconnues_cli)
+    dim_client.to_csv(os.path.join(VENTES_DIR, 'dim_client.csv'), index=False, encoding='utf-8-sig')
 
-    # --- Dimension Temps ---
-    logging.info("Création de dim_temps...")
-    dates = pd.concat([df['Date BL'], df['date facture'], df['Date demandée client'], df['Date accusée AMCO']]).dropna().unique()
-    dim_temps = pd.DataFrame({'date_cle': dates})
-    unknown_date = pd.to_datetime('1900-01-01')
-    if unknown_date not in dim_temps['date_cle'].values:
-        dim_temps = pd.concat([dim_temps, pd.DataFrame([{'date_cle': unknown_date}])], ignore_index=True)
+    # --- 4. Dimension: dim_temps ---
+    logging.info("Création de ventes/dim_temps.csv")
+    dates = pd.to_datetime(df['Date BL'], errors='coerce').dropna().unique()
+    dim_temps_base = pd.DataFrame({'date_cle': dates}).sort_values('date_cle').reset_index(drop=True)
+    valeurs_inconnues_tps = {'date_cle': DATE_INCONNUE}
+    dim_temps = creer_dimension_avec_inconnu(dim_temps_base, 'dim_temps_id', valeurs_inconnues_tps)
     dim_temps['annee'] = dim_temps['date_cle'].dt.year
     dim_temps['mois'] = dim_temps['date_cle'].dt.month
     dim_temps['jour'] = dim_temps['date_cle'].dt.day
-    dim_temps['dim_temps_id'] = dim_temps.index + 1
-    dim_temps = dim_temps[['dim_temps_id', 'date_cle', 'annee', 'mois', 'jour']]
-    dim_temps.to_csv(os.path.join(VENTES_DIR, 'dim_temps.csv'), index=False)
-    logging.info(f"dim_temps.csv généré avec {len(dim_temps)} lignes.")
-    
+    dim_temps.to_csv(os.path.join(VENTES_DIR, 'dim_temps.csv'), index=False, encoding='utf-8-sig')
+
     # --- Table des Faits : Ventes ---
     logging.info("Construction de fact_ventes...")
-    fact_cols = {
-        'dl_no': get_col(df, 'N° Ligne doc'), 'date_bl': get_col(df, 'Date BL'), 'num_bl': get_col(df, 'N° BL'),
-        'condition_livraison': get_col(df, 'condition_livraison'), 'date_demandee_client': get_col(df, 'Date demandée client'),
-        'date_accusee_amco': get_col(df, 'Date accusée AMCO'), 'num_facture': get_col(df, 'N° facture'),
-        'date_facture': get_col(df, 'date facture'), 'qte_vendue': get_col(df, 'Qté fact'),
-        'prix_unitaire': get_col(df, 'Prix Unitaire'), 'montant_ht': get_col(df, 'Tot HT'),
-        'code_client': get_col(df, 'Code client'), 'code_article': get_col(df, 'code article').str.strip()
-    }
-    fact = pd.DataFrame(fact_cols)
-    fact = fact.merge(dim_client[['code_client', 'dim_client_id']], on='code_client', how='left')
-    fact = fact.merge(dim_article[['code_article', 'dim_article_id']], on='code_article', how='left')
-    unknown_article_id = dim_article.loc[dim_article['code_article'] == 'UNKNOWN', 'dim_article_id'].iloc[0]
-    fact['dim_article_id'].fillna(unknown_article_id, inplace=True)
-    fact['dim_article_id'] = fact['dim_article_id'].astype(int)
-    fact = fact.merge(dim_temps[['date_cle', 'dim_temps_id']], left_on='date_bl', right_on='date_cle', how='left')
-    unknown_date_id = dim_temps.loc[dim_temps['date_cle'] == unknown_date, 'dim_temps_id'].iloc[0]
-    fact['dim_temps_id'].fillna(unknown_date_id, inplace=True)
-    fact['dim_temps_id'] = fact['dim_temps_id'].astype(int)
-    fact_ventes = fact[['dl_no', 'date_bl', 'num_bl', 'condition_livraison', 'date_demandee_client', 'date_accusee_amco', 'num_facture', 'date_facture', 'qte_vendue', 'prix_unitaire', 'montant_ht', 'dim_client_id', 'dim_article_id', 'dim_temps_id']]
-    fact_ventes.to_csv(os.path.join(VENTES_DIR, 'fact_ventes.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"fact_ventes.csv généré avec {len(fact_ventes)} lignes. Processus VENTES terminé.")
+    fact = df.copy()
+    fact = fact.merge(dim_client[['code_client', 'dim_client_id']], left_on='Code client', right_on='code_client', how='left')
+    fact = fact.merge(dim_article[['code_article', 'dim_article_id']], left_on='code article', right_on='code_article', how='left')
+    fact = fact.merge(dim_temps[['date_cle', 'dim_temps_id']], left_on='Date BL', right_on='date_cle', how='left')
+    
+    fact['dim_client_id'].fillna(ID_INCONNU, inplace=True)
+    fact['dim_article_id'].fillna(ID_INCONNU, inplace=True)
+    fact['dim_temps_id'].fillna(ID_INCONNU, inplace=True)
+    
+    fact_ventes = fact.rename(columns={
+        'N° Ligne doc': 'dl_no', 'N° Cde': 'num_cde', 'Date BL': 'date_bl',
+        'N° BL': 'num_bl', 'Qté fact': 'qte_vendue', 'Prix Unitaire': 'prix_unitaire',
+        'Tot HT': 'montant_ht'
+    })
+    
+    colonnes_int = ['dl_no', 'num_cde', 'dim_client_id', 'dim_article_id', 'dim_temps_id']
+    for col in colonnes_int:
+        if col in fact_ventes.columns:
+            fact_ventes[col] = pd.to_numeric(fact_ventes[col], errors='coerce').astype('Int64')
 
+    final_cols = ['dl_no', 'num_cde', 'date_bl', 'num_bl', 'qte_vendue', 'prix_unitaire', 'montant_ht', 'dim_client_id', 'dim_article_id', 'dim_temps_id']
+    fact_ventes_final = fact_ventes[[col for col in final_cols if col in fact_ventes.columns]]
+    
+    fact_ventes_final.to_csv(os.path.join(VENTES_DIR, 'fact_ventes.csv'), index=False, encoding='utf-8-sig')
+    logging.info(f"fact_ventes.csv généré avec {len(fact_ventes_final)} lignes.")
 
 # =============================================================================
 # MODÈLE EN ÉTOILE POUR LES ACHATS
 # =============================================================================
 def generer_csv_achats_star():
-    """Génère les fichiers CSV pour le modèle en étoile des achats."""
     logging.info("Début de la génération du modèle en étoile pour les ACHATS.")
-    
-    df = charger_et_nettoyer_csv(
-        os.path.join(dossier_datalake_processed, 'tabla_generale_achats.csv'),
-        dates_a_parser=['date achat'],
-        dayfirst_format=True
-    )
+    df = charger_et_nettoyer_csv(os.path.join(dossier_datalake_processed, 'tabla_generale_achats.csv'), dates_a_parser=['date achat'], dayfirst_format=True)
     if df is None: return
 
-    # --- Dimension Fournisseurs ---
-    logging.info("Création de dim_fournisseur...")
-    dim_fourn_cols = {
-        'code_fournisseur': get_col(df, 'Code fournisseur'),
-        'raison_sociale': get_col(df, 'Raison sociale')
-    }
-    dim_fourn = pd.DataFrame(dim_fourn_cols).dropna(subset=['code_fournisseur'])
-    dim_fourn = dim_fourn.drop_duplicates(subset=['code_fournisseur']).reset_index(drop=True)
-    dim_fourn['dim_fournisseur_id'] = dim_fourn.index + 1
-    dim_fourn = dim_fourn[['dim_fournisseur_id', 'code_fournisseur', 'raison_sociale']]
-    dim_fourn.to_csv(os.path.join(ACHATS_DIR, 'dim_fournisseur.csv'), index=False, encoding='utf-8-sig')
-
-    # --- Dimension Familles d'Articles (Achats) ---
-    logging.info("Création de dim_famille_article...")
-    # *** CORRECTION : La clé naturelle est 'Code Famille' ***
-    dim_fam_achats_cols = {
-        'code_famille': get_col(df, 'Code Famille'),
-        'libelle_famille': get_col(df, 'famille article libellé'),
-        'libelle_sous_famille': get_col(df, 'sous-famille article libellé')
-    }
-    dim_fam_achats = pd.DataFrame(dim_fam_achats_cols).dropna(subset=['code_famille'])
-    dim_fam_achats = dim_fam_achats.drop_duplicates(subset=['code_famille'])
-    # Logique robuste pour la ligne UNKNOWN
-    dim_fam_achats = dim_fam_achats[dim_fam_achats['code_famille'] != 'UNKNOWN']
-    unknown_row_achats = pd.DataFrame([{'code_famille': 'UNKNOWN', 'libelle_famille': 'UNKNOWN', 'libelle_sous_famille': 'UNKNOWN'}])
-    dim_fam_achats = pd.concat([unknown_row_achats, dim_fam_achats], ignore_index=True)
-    dim_fam_achats['famille_id'] = dim_fam_achats.index + 1
-    dim_fam_achats = dim_fam_achats[['famille_id', 'code_famille', 'libelle_famille', 'libelle_sous_famille']]
+    # --- 1. Dimension: dim_famille_article (Achats) ---
+    logging.info("Création de achats/dim_famille_article.csv")
+    dim_fam_achats_base = df[['Code Famille', 'famille article libellé', 'sous-famille article libellé']].rename(columns={'Code Famille': 'fa_codef', 'famille article libellé': 'fa_central', 'sous-famille article libellé': 'fa_intitule'}).dropna(subset=['fa_codef']).drop_duplicates(subset=['fa_codef']).reset_index(drop=True)
+    valeurs_inconnues_fam_a = {'fa_codef': VALEUR_CODE_INCONNU, 'fa_central': VALEUR_TEXTE_INCONNU, 'fa_intitule': VALEUR_TEXTE_INCONNU}
+    dim_fam_achats = creer_dimension_avec_inconnu(dim_fam_achats_base, 'famille_id', valeurs_inconnues_fam_a)
     dim_fam_achats.to_csv(os.path.join(ACHATS_DIR, 'dim_famille_article.csv'), index=False, encoding='utf-8-sig')
 
-    # --- Dimension Articles (Achats) ---
-    logging.info("Création de dim_article pour les achats...")
-    dim_article_cols = {
-        'ar_ref': get_col(df, 'code article').str.strip(),
-        'designation': get_col(df, 'Désignation'),
-        'code_famille': get_col(df, 'Code Famille') # Clé pour la jointure
-    }
-    dim_article = pd.DataFrame(dim_article_cols).dropna(subset=['ar_ref'])
-    dim_article = dim_article.drop_duplicates(subset=['ar_ref']).reset_index(drop=True)
+    # --- 2. Dimension: dim_article (Achats) ---
+    logging.info("Création de achats/dim_article.csv")
+    dim_art_achats_base = df[['code article', 'Code Famille']].rename(columns={'code article': 'ar_ref', 'Code Famille': 'fa_codef'}).dropna(subset=['ar_ref']).drop_duplicates(subset=['ar_ref']).reset_index(drop=True)
+    dim_art_achats_base = dim_art_achats_base.merge(dim_fam_achats[['fa_codef', 'famille_id']], on='fa_codef', how='left')
+    dim_art_achats_base['famille_id'].fillna(ID_INCONNU, inplace=True)
     
-    # *** CORRECTION : Jointure sur 'code_famille' ***
-    dim_article['code_famille'].fillna('UNKNOWN', inplace=True)
-    unknown_fam_id_achats = dim_fam_achats.loc[dim_fam_achats['code_famille'] == 'UNKNOWN', 'famille_id'].iloc[0]
-    dim_article = dim_article.merge(dim_fam_achats[['code_famille', 'famille_id']], on='code_famille', how='left')
-    dim_article['famille_id'].fillna(unknown_fam_id_achats, inplace=True)
-    dim_article['famille_id'] = dim_article['famille_id'].astype(int)
+    valeurs_inconnues_art_a = {'ar_ref': VALEUR_CODE_INCONNU, 'famille_id': ID_INCONNU}
+    dim_article_achats = creer_dimension_avec_inconnu(dim_art_achats_base.drop(columns=['fa_codef']), 'article_id', valeurs_inconnues_art_a)
+    dim_article_achats['famille_id'] = dim_article_achats['famille_id'].astype('Int64')
+    dim_article_achats_final = dim_article_achats[['article_id', 'ar_ref', 'famille_id']]
+    dim_article_achats_final.to_csv(os.path.join(ACHATS_DIR, 'dim_article.csv'), index=False, encoding='utf-8-sig')
 
-    if 'UNKNOWN' not in dim_article['ar_ref'].values:
-        unknown_row = pd.DataFrame([{'ar_ref': 'UNKNOWN', 'designation': 'UNKNOWN', 'code_famille': 'UNKNOWN', 'famille_id': unknown_fam_id_achats}])
-        dim_article = pd.concat([dim_article, unknown_row], ignore_index=True)
-    dim_article['article_id'] = dim_article.index + 1
-    dim_article = dim_article[['article_id', 'ar_ref', 'designation', 'famille_id']]
-    dim_article.to_csv(os.path.join(ACHATS_DIR, 'dim_article.csv'), index=False, encoding='utf-8-sig')
+    # --- 3. Dimension: dim_fournisseur ---
+    logging.info("Création de achats/dim_fournisseur.csv")
+    dim_fourn_cols = ['Code fournisseur', 'Raison sociale', 'Contact', 'Adresse', 'Complement adresse', 'Code postal', 'Ville', 'N° telephone', 'N° fax']
+    dim_fourn_base = df[dim_fourn_cols].rename(columns={'Code fournisseur': 'ct_numpayeur', 'Raison sociale': 'raison_sociale', 'Contact': 'contact', 'Adresse': 'adresse', 'Complement adresse': 'complement', 'Code postal': 'code_postal', 'Ville': 'ville', 'N° telephone': 'telephone', 'N° fax': 'fax'}).dropna(subset=['ct_numpayeur']).drop_duplicates(subset=['ct_numpayeur']).reset_index(drop=True)
+    valeurs_inconnues_fourn = {'ct_numpayeur': VALEUR_CODE_INCONNU, 'raison_sociale': VALEUR_TEXTE_INCONNU, 'contact': VALEUR_TEXTE_INCONNU, 'adresse': VALEUR_TEXTE_INCONNU, 'complement': '', 'code_postal': '', 'ville': VALEUR_TEXTE_INCONNU, 'telephone': '', 'fax': ''}
+    dim_fourn = creer_dimension_avec_inconnu(dim_fourn_base, 'fournisseur_id', valeurs_inconnues_fourn)
+    dim_fourn.to_csv(os.path.join(ACHATS_DIR, 'dim_fournisseur.csv'), index=False, encoding='utf-8-sig')
 
-    # --- Dimension Date (Achats) ---
-    logging.info("Création de dim_date...")
-    dates = df['date achat'].dropna().unique()
-    dim_date = pd.DataFrame({'date_full': dates})
-    unknown_date = pd.to_datetime('1900-01-01')
-    if unknown_date not in dim_date['date_full'].values:
-        dim_date = pd.concat([dim_date, pd.DataFrame([{'date_full': unknown_date}])], ignore_index=True)
+    # --- 4. Dimension: dim_date (Achats) ---
+    logging.info("Création de achats/dim_date.csv")
+    dates_achats = pd.to_datetime(df['date achat'], errors='coerce').dropna().unique()
+    dim_date_base = pd.DataFrame({'date_full': dates_achats}).sort_values('date_full').reset_index(drop=True)
+    valeurs_inconnues_date_a = {'date_full': DATE_INCONNUE}
+    dim_date = creer_dimension_avec_inconnu(dim_date_base, 'date_id', valeurs_inconnues_date_a)
     dim_date['annee'] = dim_date['date_full'].dt.year
     dim_date['mois'] = dim_date['date_full'].dt.month
     dim_date['jour'] = dim_date['date_full'].dt.day
-    dim_date['date_id'] = dim_date.index + 1
-    dim_date = dim_date[['date_id', 'date_full', 'annee', 'mois', 'jour']]
+    dim_date['trimestre'] = dim_date['date_full'].dt.quarter
     dim_date.to_csv(os.path.join(ACHATS_DIR, 'dim_date.csv'), index=False, encoding='utf-8-sig')
+    
+    # --- 5. Dimension: dim_mode_expedition ---
+    logging.info("Création de achats/dim_mode_expedition.csv")
+    dim_mode_base = df[['Mode d\'expedition']].rename(columns={'Mode d\'expedition': 'libelle'}).dropna(subset=['libelle']).drop_duplicates(subset=['libelle']).reset_index(drop=True)
+    valeurs_inconnues_mode = {'libelle': VALEUR_TEXTE_INCONNU}
+    dim_mode = creer_dimension_avec_inconnu(dim_mode_base, 'mode_id', valeurs_inconnues_mode)
+    dim_mode['code_expedit'] = dim_mode['libelle'].str.upper().str.replace(' ', '_').str.slice(0, 20)
+    dim_mode_final = dim_mode[['mode_id', 'code_expedit', 'libelle']]
+    dim_mode_final.to_csv(os.path.join(ACHATS_DIR, 'dim_mode_expedition.csv'), index=False, encoding='utf-8-sig')
 
     # --- Table des Faits : Achats ---
     logging.info("Construction de fact_achats...")
-    fact_cols = {
-        'date_achat': get_col(df, 'date achat'), 'code_fournisseur': get_col(df, 'Code fournisseur'),
-        'ar_ref': get_col(df, 'code article').str.strip(), 'bon_de_commande': get_col(df, 'Bon de commande'),
-        'qte_fact': get_col(df, 'Qté fact'), 'total_tva': get_col(df, 'Total TVA'),
-        'total_ht': get_col(df, 'Total HT'), 'total_ttc': get_col(df, 'Total TTC'),
-        'net_a_payer': get_col(df, 'NET A PAYER')
-    }
-    fact = pd.DataFrame(fact_cols)
-    fact = fact.merge(dim_date[['date_full', 'date_id']], left_on='date_achat', right_on='date_full', how='left')
-    unknown_date_id = dim_date.loc[dim_date['date_full'] == unknown_date, 'date_id'].iloc[0]
-    fact['date_id'].fillna(unknown_date_id, inplace=True)
-    fact['date_id'] = fact['date_id'].astype(int)
-    fact = fact.merge(dim_fourn[['code_fournisseur', 'dim_fournisseur_id']], on='code_fournisseur', how='left')
-    fact = fact.merge(dim_article[['ar_ref', 'article_id']], on='ar_ref', how='left')
-    unknown_article_id = dim_article.loc[dim_article['ar_ref'] == 'UNKNOWN', 'article_id'].iloc[0]
-    fact['article_id'].fillna(unknown_article_id, inplace=True)
-    fact['article_id'] = fact['article_id'].astype(int)
-    fact_achats = fact[['date_id', 'dim_fournisseur_id', 'article_id', 'bon_de_commande', 'qte_fact', 'total_tva', 'total_ht', 'total_ttc', 'net_a_payer']]
-    fact_achats.to_csv(os.path.join(ACHATS_DIR, 'fact_achats.csv'), index=False, encoding='utf-8-sig')
-    logging.info(f"fact_achats.csv généré avec {len(fact_achats)} lignes. Processus ACHATS terminé.")
+    fact = df.copy()
+    fact = fact.merge(dim_date[['date_full', 'date_id']], left_on='date achat', right_on='date_full', how='left')
+    fact = fact.merge(dim_fourn[['ct_numpayeur', 'fournisseur_id']], left_on='Code fournisseur', right_on='ct_numpayeur', how='left')
+    fact = fact.merge(dim_article_achats[['ar_ref', 'article_id']], left_on='code article', right_on='ar_ref', how='left')
+    fact = fact.merge(dim_mode[['libelle', 'mode_id']], left_on='Mode d\'expedition', right_on='libelle', how='left')
+
+    fact['date_id'].fillna(ID_INCONNU, inplace=True)
+    fact['fournisseur_id'].fillna(ID_INCONNU, inplace=True)
+    fact['article_id'].fillna(ID_INCONNU, inplace=True)
+    fact['mode_id'].fillna(ID_INCONNU, inplace=True)
+
+    for col in ['date_id', 'fournisseur_id', 'article_id', 'mode_id']:
+        fact[col] = fact[col].astype('Int64')
+
+    fact_achats = fact.rename(columns={'Bon de commande': 'bon_de_commande', 'Qté fact': 'qte_fact', 'Total TVA': 'total_tva', 'Total HT': 'total_ht', 'Total TTC': 'total_ttc', 'NET A PAYER': 'net_a_payer', 'Reference achat': 'do_ref'})
+    
+    final_cols = ['date_id', 'fournisseur_id', 'article_id', 'mode_id', 'do_ref', 'bon_de_commande', 'qte_fact', 'total_tva', 'total_ht', 'total_ttc', 'net_a_payer']
+    fact_achats_final = fact_achats[[col for col in final_cols if col in fact_achats.columns]]
+    
+    fact_achats_final.to_csv(os.path.join(ACHATS_DIR, 'fact_achats.csv'), index=False, encoding='utf-8-sig')
+    logging.info("Processus ACHATS terminé.")
 
 # --- Point d'entrée principal ---
 def main():
     """Exécute la génération des modèles en étoile pour les ventes et les achats."""
     generer_csv_ventes_star()
-    print("-" * 60) # Séparateur visuel
+    print("-" * 60)
     generer_csv_achats_star()
     logging.info("Toutes les opérations sont terminées.")
 
